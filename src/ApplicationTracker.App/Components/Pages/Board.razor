@@ -232,19 +232,30 @@ else
     {
         openMenuId = null;
 
-        // Moves run one at a time, and the board is reloaded before the lock is released, so a
-        // queued move (a quick second click, or a drop) sees the card as the previous move left it.
+        // Serialize moves and read the persisted status under the lock; a reload can
+        // fail or be superseded by a search without updating the displayed card.
         await moveLock.WaitAsync();
         try
         {
-            if (FindCard(id) is not { } card || targetFor(card.Status) is not ApplicationStatus status || status == card.Status)
+            if (FindCard(id) is not { } card)
             {
                 return;
             }
 
+            var status = card.Status;
             try
             {
-                if (!await Applications.ChangeStatusAsync(id, status))
+                var current = await Applications.GetForEditAsync(id);
+                if (current is not null)
+                {
+                    if (targetFor(current.Status) is not ApplicationStatus target || target == current.Status)
+                    {
+                        return;
+                    }
+                    status = target;
+                }
+
+                if (current is null || !await Applications.ChangeStatusAsync(id, status))
                 {
                     errorNotice = $"{card.RoleTitle} at {card.CompanyName} no longer exists. It may have been deleted elsewhere.";
                     await LoadAsync();
