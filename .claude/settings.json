@@ -21,8 +21,8 @@
       "PowerShell(git log *)"
     ],
     "deny": [
-      "Read(./data/**)",
-      "Edit(./data/**)",
+      "Read(/data/**)",
+      "Edit(/data/**)",
       "Read(**/*.db)",
       "Edit(**/*.db)",
       "Read(**/*.sqlite*)",

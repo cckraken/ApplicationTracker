@@ -17,19 +17,21 @@ Nice-to-have later: import a job posting from a URL or pasted text, CSV export, 
 
 ## Stack
 
-- **.NET 8+ / C#**, nullable reference types enabled, implicit usings on.
+- **.NET 10 / C#**, nullable reference types enabled, implicit usings on.
 - **SQLite** via **EF Core** (`Microsoft.EntityFrameworkCore.Sqlite`).
 - **Tests**: xUnit; data tests use SQLite in-memory (`DataSource=:memory:`), not the EF InMemory provider.
-- **UI host**: _not decided yet_ (see Open decisions).
+- **UI host**: **Blazor Web App, Interactive Server render mode, run locally** on the user's PC and used in the browser at `localhost`. Decided 2026-11-21. Keep logic in `Core` so the app can later be hosted online (that would need auth, HTTPS and backups) without a rewrite.
 
-### Open decisions
+### Solution layout
 
-- **UI host**: leading option is **Blazor Server** (runs locally, opens in the browser, all C#). Alternatives: Blazor Hybrid via .NET MAUI (native Windows window) or WPF. Record the decision here once made and update the Commands section.
-- Solution layout (suggested): `src/ApplicationTracker.Core` (domain + EF), `src/ApplicationTracker.App` (UI), `tests/ApplicationTracker.Tests`.
+- `ApplicationTracker.slnx`
+- `src/ApplicationTracker.Core`: domain entities, `TrackerDbContext`, EF migrations, business rules. No UI references.
+- `src/ApplicationTracker.App`: Blazor Web App (UI only); references Core.
+- `tests/ApplicationTracker.Tests`: xUnit; references Core.
 
 ## Domain model (sketch)
 
-- `Application`: Id, Company, RoleTitle, PostingUrl, Location, SalaryRange, Source, AppliedOn, CurrentStatus, FollowUpOn, CreatedAt, UpdatedAt
+- `JobApplication`: Id, Company, RoleTitle, PostingUrl, Location, SalaryRange, Source, AppliedOn, CurrentStatus, FollowUpOn, CreatedAt, UpdatedAt. Change status only via `ChangeStatus(newStatus, utcNow)`, which writes the `StatusChange` history.
 - `Company`: Id, Name, Website, Notes
 - `Contact`: Id, Name, Role, Email, Phone, LinkedInUrl, CompanyId, linked to applications
 - `Note`: Id, ApplicationId, Body, CreatedAt
@@ -50,7 +52,7 @@ Nice-to-have later: import a job posting from a URL or pasted text, CSV export, 
 
 ## Commands
 
-Placeholders until the solution exists; update once it does.
+Run from the repo root. The app applies pending migrations on startup and creates `data/tracker.db` if missing.
 
 ```powershell
 dotnet restore
