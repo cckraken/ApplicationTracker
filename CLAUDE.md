@@ -51,6 +51,27 @@ Nice-to-have later: import a job posting from a URL or pasted text, CSV export, 
 - New logic comes with tests. Run `dotnet test` before saying a change is done.
 - Small, focused commits with descriptive messages. Commit only when asked.
 
+## GitHub & Git Conventions
+
+### Branching
+- Never commit directly to `main`.
+- Create feature branches from `main` using the format: `<type>:<issue-number>-<short-description>` (e.g., `feat:42-user-auth`, `fix:108-null-pointer`).
+- Allowed types: `feat`, `fix`, `chore`, `docs`, `refactor`, `test`.
+
+### Commit Messages
+- Follow Conventional Commits: `<type>(<scope>): <subject>`
+- Keep the subject line under 50 characters, imperative mood, no trailing period (e.g., `feat(api): add rate limiting to login endpoint`).
+- Reference the related GitHub issue in the commit footer if applicable (`Refs #42`).
+
+### Pull Requests & GitHub CLI (`gh`)
+- Use the `gh` CLI when asked to create issues or pull requests.
+- PR titles must follow the same Conventional Commits format as commit messages.
+- Before opening a PR, run all local linters and test suites to ensure checks pass.
+- Populate PR descriptions with:
+  - **Summary:** 1–3 bullet points explaining *what* changed and *why*. Only exceed this if the change is large and 1-3 points would exclude important information.
+  - **Testing:** Steps taken to verify the changes.
+  - **Issue Link:** Use `Closes #<issue-number>` to auto-close linked issues.
+
 ## Commands
 
 Run from the repo root. The app applies pending migrations on startup and creates its database file if missing.
