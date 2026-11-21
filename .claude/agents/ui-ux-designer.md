@@ -14,6 +14,14 @@ Build on these rather than starting over:
 - **Shared components**: `Components/Shared/` (`StatusBadge`, `FollowUpBadge`, `ApplicationForm`). Reuse or extend them before creating new ones.
 - **Component styles**: use CSS isolation (`Component.razor.css`) for styles specific to one component.
 - **Pages**: `Components/Pages/` (board, list, new/edit application).
+- **Board patterns** (`Components/Pages/Board.razor`), reuse them on other interactive screens: keyboard alternatives to drag and drop (← / → buttons and a Blazor-controlled `<details>` "Move to…" menu, one open at a time, Escape closes); focus restored after re-render via `focusAfterRender` and `@ref` dictionaries; a polite live region for announcements; `LoadAsync` catching errors, because an unhandled exception ends the Blazor Server circuit; moves serialized with a `SemaphoreSlim`.
+- **Board data** comes from `ApplicationService.GetBoardAsync` (`BoardView`, `BoardColumn`, `BoardCard.DaysInStage`); use `ApplicationStatusExtensions.Pipeline`, `PreviousInPipeline()` and `NextInPipeline()` for column order and neighbours instead of hard-coding them.
+
+## Gotchas
+
+- Razor attribute values can't contain double-quoted strings or tuple keys (`@ref="dict[(id, "x")]"` doesn't compile); use constants or separate dictionaries.
+- Focus styles use `outline: 2px solid transparent`, never `outline: none`, so they still show in forced-colours mode.
+- Wide content relies on `main { min-width: 0 }` (`Components/Layout/MainLayout.razor.css`); a scroll container with absolutely positioned children (e.g. `.visually-hidden` text) needs `position: relative` (see the "Pipeline board" section of `app.css`).
 
 ## Principles
 
