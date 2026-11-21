@@ -1,0 +1,53 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dotnet build *)",
+      "Bash(dotnet test *)",
+      "Bash(dotnet run *)",
+      "Bash(dotnet restore *)",
+      "Bash(dotnet format *)",
+      "Bash(dotnet ef *)",
+      "Bash(git status *)",
+      "Bash(git diff *)",
+      "Bash(git log *)",
+      "PowerShell(dotnet build *)",
+      "PowerShell(dotnet test *)",
+      "PowerShell(dotnet run *)",
+      "PowerShell(dotnet restore *)",
+      "PowerShell(dotnet format *)",
+      "PowerShell(dotnet ef *)",
+      "PowerShell(git status *)",
+      "PowerShell(git diff *)",
+      "PowerShell(git log *)"
+    ],
+    "deny": [
+      "Read(./data/**)",
+      "Edit(./data/**)",
+      "Read(**/*.db)",
+      "Edit(**/*.db)",
+      "Read(**/*.sqlite*)",
+      "Edit(**/*.sqlite*)",
+      "Read(**/.env*)",
+      "Edit(**/.env*)",
+      "Read(**/appsettings.*.local.json)",
+      "Edit(**/appsettings.*.local.json)",
+      "Read(**/secrets.json)",
+      "Edit(**/secrets.json)"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$CLAUDE_PROJECT_DIR/.claude/hooks/format-cs.ps1\"",
+            "timeout": 60,
+            "statusMessage": "Formatting C# file"
+          }
+        ]
+      }
+    ]
+  }
+}

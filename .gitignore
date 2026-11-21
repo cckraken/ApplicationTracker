@@ -1,0 +1,31 @@
+# .NET build output
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+*.user
+*.suo
+*.rsuser
+.vs/
+.vscode/
+.idea/
+TestResults/
+*.trx
+coverage*/
+
+# Personal data: never commit
+data/
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# Secrets and local overrides
+.env
+.env.*
+appsettings.*.local.json
+secrets.json
+
+# Claude Code personal settings
+.claude/settings.local.json
