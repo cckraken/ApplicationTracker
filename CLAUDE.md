@@ -31,7 +31,7 @@ Nice-to-have later: import a job posting from a URL or pasted text, CSV export, 
 
 ## Domain model (sketch)
 
-- `JobApplication`: Id, Company, RoleTitle, PostingUrl, Location, SalaryRange, Source, AppliedOn, CurrentStatus, FollowUpOn, CreatedAt, UpdatedAt. Change status only via `ChangeStatus(newStatus, utcNow)`, which writes the `StatusChange` history.
+- `JobApplication`: Id, Company, RoleTitle, PostingUrl, Location, SalaryRange, Source, AppliedOn, CurrentStatus, FollowUpOn, CreatedAt, UpdatedAt. Change status only via `ChangeStatus(newStatus, utcNow, localToday)`, which writes the `StatusChange` history (`localToday` fills `AppliedOn`, because the UTC and local dates can differ).
 - `Company`: Id, Name, Website, Notes
 - `Contact`: Id, Name, Role, Email, Phone, LinkedInUrl, CompanyId, linked to applications
 - `Note`: Id, ApplicationId, Body, CreatedAt
@@ -55,7 +55,7 @@ Nice-to-have later: import a job posting from a URL or pasted text, CSV export, 
 
 ### Branching
 - Never commit directly to `main`.
-- Create feature branches from `main` using the format: `<type>:<issue-number>-<short-description>` (e.g., `feat:42-user-auth`, `fix:108-null-pointer`).
+- Create feature branches from `main` using the format: `<type>/<issue-number>-<short-description>` (e.g., `feat/42-user-auth`, `fix/108-null-pointer`). Git does not allow `:` in branch names. When there is no issue, leave the number out (e.g., `feat/board`).
 - Allowed types: `feat`, `fix`, `chore`, `docs`, `refactor`, `test`.
 
 ### Commit Messages

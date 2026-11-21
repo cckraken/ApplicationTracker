@@ -1,7 +1,474 @@
 @page "/board"
+@inject ApplicationService Applications
+@inject ILogger<Board> Logger
 
-<PageTitle>Board</PageTitle>
+<PageTitle>Board · Application Tracker</PageTitle>
 
-<h1>Board</h1>
+<h1 class="mb-3">Board</h1>
 
-<p>The pipeline board is coming next. For now, use the <a href="applications">applications list</a>.</p>
+@if (errorNotice is not null)
+{
+    <div class="alert alert-danger alert-dismissible" role="alert">
+        @errorNotice
+        <button type="button" class="btn-close" aria-label="Dismiss error" @onclick="() => errorNotice = null"></button>
+    </div>
+}
+
+<div class="row g-2 align-items-end mb-3" role="search" aria-label="Filter the board">
+    <div class="col-sm-6 col-lg-5">
+        <label for="board-search" class="form-label">Search</label>
+        <input id="board-search" type="search" class="form-control" placeholder="Company or role" @ref="searchInput"
+               @bind="search" @bind:event="oninput" @bind:after="LoadAsync" />
+    </div>
+</div>
+
+<p class="visually-hidden" role="status" aria-live="polite">@announcement</p>
+
+@if (board is null)
+{
+    <p>Loading…</p>
+}
+else if (TotalCount == 0)
+{
+    <div class="empty-state">
+        @if (!string.IsNullOrWhiteSpace(search))
+        {
+            <h2 class="h5">No applications match “@search.Trim()”</h2>
+            <p>Try a different company or role.</p>
+            <button type="button" class="btn btn-outline-primary" @onclick="ClearSearchAsync">Clear search</button>
+        }
+        else
+        {
+            <h2 class="h5">No applications yet</h2>
+            <p>Add a job you have applied for, or one you are thinking about. It will appear here in its stage, and you can move it along as things progress.</p>
+            <a class="btn btn-primary" href="applications/new">Add your first application</a>
+        }
+    </div>
+}
+else
+{
+    <p id="board-summary" class="results-summary">
+        @TotalCount @ApplicationsWord(TotalCount)
+        @if (OverdueCount > 0)
+        {
+            <span aria-hidden="true"> · </span><span class="visually-hidden">, </span>
+            <span class="followup-date-overdue">@OverdueCount overdue</span>
+        }
+        @if (DueTodayCount > 0)
+        {
+            <span aria-hidden="true"> · </span><span class="visually-hidden">, </span>
+            <span class="followup-date-due-today">@DueTodayCount due today</span>
+        }
+    </p>
+
+    <div class="board">
+        @foreach (var column in board.Columns)
+        {
+            var status = column.Status;
+            <section class="board-column @StatusBadge.CssClassFor(status) @(dropTarget == status ? "is-drop-target" : "")"
+                     aria-labelledby="@($"column-{status}")"
+                     @ondragenter="() => SetDropTarget(status)"
+                     @ondragover:preventDefault
+                     @ondrop="() => DropAsync(status)" @ondrop:preventDefault>
+                <h2 id="@($"column-{status}")" class="board-column-heading">
+                    @status
+                    <span class="board-count">@column.Cards.Count<span class="visually-hidden"> @ApplicationsWord(column.Cards.Count)</span></span>
+                </h2>
+                @if (column.Cards.Count == 0)
+                {
+                    <p class="board-column-empty">@(draggedId is null ? "None" : "Drop here")</p>
+                }
+                else
+                {
+                    <ol class="board-cards">
+                        @foreach (var card in column.Cards)
+                        {
+                            @CardItem(card)
+                        }
+                    </ol>
+                }
+            </section>
+        }
+    </div>
+
+    <section class="board-closed @(dropTarget == ClosedDropStatus ? "is-drop-target" : "")" aria-labelledby="closed-heading"
+             @ondragenter="() => SetDropTarget(ClosedDropStatus)"
+             @ondragover:preventDefault
+             @ondrop="() => DropAsync(ClosedDropStatus)" @ondrop:preventDefault>
+        <h2 id="closed-heading" class="board-column-heading justify-content-start mb-0">
+            <button type="button" class="board-closed-toggle" aria-expanded="@(closedOpen ? "true" : "false")"
+                    aria-controls="closed-cards" @onclick="() => closedOpen = !closedOpen">
+                <span class="board-closed-chevron" aria-hidden="true">@(closedOpen ? "▾" : "▸")</span>
+                Closed
+                <span class="board-count">@board.Closed.Count<span class="visually-hidden"> @ApplicationsWord(board.Closed.Count)</span></span>
+            </button>
+        </h2>
+        <p class="small text-body-secondary mb-0 mt-1">Rejected and withdrawn. Drop a card here to mark it rejected.</p>
+        <div id="closed-cards" hidden="@(!closedOpen)">
+            @if (board.Closed.Count == 0)
+            {
+                <p class="board-column-empty mt-2">None</p>
+            }
+            else
+            {
+                <ol class="board-cards board-cards-closed mt-2">
+                    @foreach (var card in board.Closed)
+                    {
+                        @CardItem(card)
+                    }
+                </ol>
+            }
+        </div>
+    </section>
+}
+
+@code {
+    // Dropping a card on the Closed section marks it Rejected (the common case;
+    // Withdrawn is in the card's "Move to…" menu).
+    private const ApplicationStatus ClosedDropStatus = ApplicationStatus.Rejected;
+
+    private const string PrevButton = "prev";
+    private const string NextButton = "next";
+
+    private BoardView? board;
+    private string search = "";
+    private string announcement = "";
+    private string? errorNotice;
+    private bool closedOpen;
+    private int loadVersion;
+
+    private int? draggedId;
+    private ApplicationStatus? dropTarget;
+
+    // One move at a time, so quick repeated clicks can't race each other.
+    private readonly SemaphoreSlim moveLock = new(1, 1);
+
+    private ElementReference searchInput;
+    private readonly Dictionary<int, ElementReference> cardRefs = new();
+    private readonly Dictionary<int, ElementReference> prevButtons = new();
+    private readonly Dictionary<int, ElementReference> nextButtons = new();
+    private readonly Dictionary<int, ElementReference> menuSummaries = new();
+    private Func<ValueTask>? focusAfterRender;
+    private int? openMenuId;
+
+    private int TotalCount => board is null ? 0 : board.Columns.Sum(c => c.Cards.Count) + board.Closed.Count;
+
+    // Closed cards never have a follow-up state, so counting the open columns is enough.
+    private int OverdueCount => board?.Columns.Sum(c => c.Cards.Count(x => x.FollowUpState == FollowUpState.Overdue)) ?? 0;
+    private int DueTodayCount => board?.Columns.Sum(c => c.Cards.Count(x => x.FollowUpState == FollowUpState.DueToday)) ?? 0;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (focusAfterRender is { } focus)
+        {
+            focusAfterRender = null;
+            try
+            {
+                await focus();
+            }
+            catch (JSException)
+            {
+                // The element went away before it could be focused; nothing useful to do.
+            }
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        // Typing in the search box can start several loads; only the newest one wins.
+        var version = ++loadVersion;
+        BoardView result;
+        try
+        {
+            result = await Applications.GetBoardAsync(search);
+        }
+        catch (Exception ex)
+        {
+            // Keep the board that is showing; an unhandled exception would end the whole circuit.
+            Logger.LogError(ex, "Loading the board failed");
+            if (version == loadVersion)
+            {
+                errorNotice ??= "Couldn't load the board. Please reload the page.";
+            }
+            return;
+        }
+
+        if (version == loadVersion)
+        {
+            board = result;
+
+            // A search that only matches closed applications: show them rather than five empty columns.
+            if (!string.IsNullOrWhiteSpace(search) && result.Columns.All(c => c.Cards.Count == 0) && result.Closed.Count > 0)
+            {
+                closedOpen = true;
+            }
+        }
+    }
+
+    private async Task ClearSearchAsync()
+    {
+        search = "";
+        await LoadAsync();
+        announcement = "Search cleared.";
+        focusAfterRender = () => searchInput.FocusAsync();
+    }
+
+    private BoardCard? FindCard(int id) =>
+        board?.Columns.SelectMany(c => c.Cards).Concat(board.Closed).FirstOrDefault(c => c.Id == id);
+
+    private Task MoveToAsync(int id, ApplicationStatus status, bool moveFocus = true) =>
+        MoveCoreAsync(id, _ => status, button: null, moveFocus);
+
+    /// <summary>← / →: the target is worked out from the card's status when the move runs, not when clicked.</summary>
+    private Task MoveByArrowAsync(int id, string button) =>
+        MoveCoreAsync(id, s => button == PrevButton ? s.PreviousInPipeline() : s.NextInPipeline(), button, moveFocus: true);
+
+    /// <param name="targetFor">The new status, given the card's current status; null means no move.</param>
+    /// <param name="button">The arrow used, so focus can return to it; null focuses the card.</param>
+    /// <param name="moveFocus">False for drag and drop, where the mouse user's focus is left alone.</param>
+    private async Task MoveCoreAsync(int id, Func<ApplicationStatus, ApplicationStatus?> targetFor, string? button, bool moveFocus)
+    {
+        openMenuId = null;
+
+        // Moves run one at a time, and the board is reloaded before the lock is released, so a
+        // queued move (a quick second click, or a drop) sees the card as the previous move left it.
+        await moveLock.WaitAsync();
+        try
+        {
+            if (FindCard(id) is not { } card || targetFor(card.Status) is not ApplicationStatus status || status == card.Status)
+            {
+                return;
+            }
+
+            try
+            {
+                if (!await Applications.ChangeStatusAsync(id, status))
+                {
+                    errorNotice = $"{card.RoleTitle} at {card.CompanyName} no longer exists. It may have been deleted elsewhere.";
+                    await LoadAsync();
+                    FocusCardOrSearch(id);
+                    return;
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Moving application {Id} to {Status} failed", id, status);
+                errorNotice = $"Couldn't move {card.RoleTitle} at {card.CompanyName}. Please try again.";
+                await LoadAsync();
+                FocusCardOrSearch(id);
+                return;
+            }
+
+            errorNotice = null;
+            if (status.IsClosed())
+            {
+                closedOpen = true; // Otherwise the card (and focus) would vanish into a collapsed section.
+            }
+
+            await LoadAsync();
+            announcement = $"{card.RoleTitle} at {card.CompanyName} moved to {status}.";
+
+            if (moveFocus)
+            {
+                // Stay on the same arrow if the card still has it, so pressing → again keeps moving it.
+                if (button is not null && HasButton(id, button))
+                {
+                    var buttons = button == PrevButton ? prevButtons : nextButtons;
+                    focusAfterRender = () => buttons.TryGetValue(id, out var buttonRef) ? buttonRef.FocusAsync() : ValueTask.CompletedTask;
+                }
+                else
+                {
+                    FocusCardOrSearch(id);
+                }
+            }
+        }
+        finally
+        {
+            moveLock.Release();
+        }
+    }
+
+    /// <summary>The card if it is still shown, otherwise the search box, so focus never drops to the page body.</summary>
+    private void FocusCardOrSearch(int id) =>
+        focusAfterRender = () => FindCard(id) is not null && cardRefs.TryGetValue(id, out var cardRef)
+            ? cardRef.FocusAsync()
+            : searchInput.FocusAsync();
+
+    private bool HasButton(int id, string button) => FindCard(id) is { } moved && button switch
+    {
+        PrevButton => moved.Status.PreviousInPipeline() is not null,
+        NextButton => moved.Status.NextInPipeline() is not null,
+        _ => false,
+    };
+
+    private async Task DropAsync(ApplicationStatus status)
+    {
+        var id = draggedId;
+        draggedId = null;
+        dropTarget = null;
+
+        if (id is int cardId)
+        {
+            // Dropping a closed card on Closed leaves it as it is (Withdrawn stays Withdrawn).
+            await MoveCoreAsync(cardId, current => current.IsClosed() && status.IsClosed() ? null : status,
+                button: null, moveFocus: false);
+        }
+    }
+
+    // dragenter bubbles from every element inside a column; only re-render when the target changes.
+    private bool skipRender;
+
+    private void SetDropTarget(ApplicationStatus status)
+    {
+        skipRender = dropTarget == status;
+        dropTarget = status;
+    }
+
+    protected override bool ShouldRender()
+    {
+        var render = !skipRender;
+        skipRender = false;
+        return render;
+    }
+
+    private void EndDrag()
+    {
+        draggedId = null;
+        dropTarget = null;
+    }
+
+    private static string ApplicationsWord(int count) => count == 1 ? "application" : "applications";
+
+    private static string DaysInStageText(int days) => days switch
+    {
+        0 => "Since today",
+        1 => "1 day",
+        _ => $"{days} days",
+    };
+
+    private static string ClosedAgoText(int days) => days switch
+    {
+        0 => "Today",
+        1 => "Yesterday",
+        _ => $"{days} days ago",
+    };
+
+    private void ToggleMenu(int id) => openMenuId = openMenuId == id ? null : id;
+
+    private void OnMenuKeyDown(KeyboardEventArgs e, int id)
+    {
+        if (e.Key == "Escape" && openMenuId == id)
+        {
+            openMenuId = null;
+            focusAfterRender = () => menuSummaries.TryGetValue(id, out var summary) ? summary.FocusAsync() : ValueTask.CompletedTask;
+        }
+    }
+
+    private static string CardClass(BoardCard card) => card switch
+    {
+        _ when card.Status.IsClosed() => "is-closed",
+        { FollowUpState: FollowUpState.Overdue } => "is-overdue",
+        { FollowUpState: FollowUpState.DueToday } => "is-due-today",
+        _ => "",
+    };
+
+    private RenderFragment CardItem(BoardCard card) => __builder =>
+    {
+        var previous = card.Status.PreviousInPipeline();
+        var next = card.Status.NextInPipeline();
+        var name = $"{card.RoleTitle} at {card.CompanyName}";
+
+        @* Blazor's drag handlers sit on the <li>; the inline ondragstart on the inner element
+           sets drag data, which Firefox needs before it will start a drag. *@
+        <li @key="card.Id" @ondragstart="() => draggedId = card.Id" @ondragend="EndDrag">
+            <article class="board-card @CardClass(card) @(draggedId == card.Id ? "is-dragging" : "")"
+                     draggable="true" ondragstart="event.dataTransfer.setData('text/plain', ''); event.dataTransfer.effectAllowed = 'move';"
+                     tabindex="-1" aria-labelledby="@($"card-{card.Id}-title card-{card.Id}-company")" @ref="cardRefs[card.Id]">
+                <h3 id="@($"card-{card.Id}-title")" class="board-card-title">
+                    <a href="applications/@card.Id/edit" draggable="false">@card.RoleTitle</a>
+                </h3>
+                <div id="@($"card-{card.Id}-company")" class="board-card-company">@card.CompanyName</div>
+
+                <div class="board-card-badges">
+                    @if (card.Status.IsClosed())
+                    {
+                        <StatusBadge Status="card.Status" />
+                    }
+                    <FollowUpBadge State="card.FollowUpState" />
+                </div>
+
+                <dl class="board-card-details">
+                    @if (!string.IsNullOrEmpty(card.Location))
+                    {
+                        <div><dt>Location</dt><dd>@card.Location</dd></div>
+                    }
+                    @if (!string.IsNullOrEmpty(card.SalaryRange))
+                    {
+                        <div><dt>Salary</dt><dd>@card.SalaryRange</dd></div>
+                    }
+                    @if (card.AppliedOn is DateOnly applied)
+                    {
+                        <div><dt>Applied</dt><dd>@applied.ToString("d MMM yyyy")</dd></div>
+                    }
+                    @if (card.FollowUpOn is DateOnly followUp && !card.Status.IsClosed())
+                    {
+                        <div>
+                            <dt>Follow up</dt>
+                            <dd class="@(card.FollowUpState switch { FollowUpState.Overdue => "followup-date-overdue", FollowUpState.DueToday => "followup-date-due-today", _ => "" })">@followUp.ToString("d MMM yyyy")</dd>
+                        </div>
+                    }
+                    @if (card.Status.IsClosed())
+                    {
+                        <div><dt>Closed</dt><dd>@ClosedAgoText(card.DaysInStage)</dd></div>
+                    }
+                    else
+                    {
+                        <div><dt>In stage</dt><dd>@DaysInStageText(card.DaysInStage)</dd></div>
+                    }
+                </dl>
+
+                <div class="board-card-actions">
+                    @if (previous is ApplicationStatus prev)
+                    {
+                        <button type="button" class="btn btn-sm btn-outline-secondary" @ref="prevButtons[card.Id]"
+                                aria-label="@($"Move {name} back to {prev}")" title="@($"Back to {prev}")"
+                                @onclick="() => MoveByArrowAsync(card.Id, PrevButton)">
+                            <span aria-hidden="true">←</span>
+                        </button>
+                    }
+                    @if (next is ApplicationStatus nxt)
+                    {
+                        <button type="button" class="btn btn-sm btn-outline-secondary" @ref="nextButtons[card.Id]"
+                                aria-label="@($"Move {name} forward to {nxt}")" title="@($"Forward to {nxt}")"
+                                @onclick="() => MoveByArrowAsync(card.Id, NextButton)">
+                            <span aria-hidden="true">→</span>
+                        </button>
+                    }
+                    @* Blazor owns the open state (one menu at a time, Escape closes, closes after a move);
+                       preventDefault stops the native toggle so the two can't disagree. *@
+                    <details class="move-menu" open="@(openMenuId == card.Id)" @onkeydown="e => OnMenuKeyDown(e, card.Id)">
+                        <summary class="btn btn-sm btn-outline-secondary" role="button"
+                                 aria-expanded="@(openMenuId == card.Id ? "true" : "false")" @ref="menuSummaries[card.Id]"
+                                 @onclick="() => ToggleMenu(card.Id)" @onclick:preventDefault>
+                            Move<span class="visually-hidden"> @name</span> to…
+                        </summary>
+                        <ul class="move-menu-list">
+                            @foreach (var target in Enum.GetValues<ApplicationStatus>().Where(s => s != card.Status))
+                            {
+                                @if (target.IsClosed() && !card.Status.IsClosed() && target == ApplicationStatus.Rejected)
+                                {
+                                    <li role="separator" class="move-menu-separator"></li>
+                                }
+                                <li>
+                                    <button type="button" class="move-menu-item" @onclick="() => MoveToAsync(card.Id, target)">@target</button>
+                                </li>
+                            }
+                        </ul>
+                    </details>
+                </div>
+            </article>
+        </li>
+    };
+}

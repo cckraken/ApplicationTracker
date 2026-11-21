@@ -31,14 +31,7 @@ public class ApplicationService(IDbContextFactory<TrackerDbContext> dbFactory, T
                                   && a.CurrentStatus != ApplicationStatus.Withdrawn);
         }
 
-        if (!string.IsNullOrWhiteSpace(filter.Search))
-        {
-            // Unicode-aware and literal: %, _ and \ in the search text have no special meaning.
-            var term = filter.Search.Trim().ToLowerInvariant();
-            query = query.Where(a => TrackerDbContext.UnicodeLower(a.Company.Name).Contains(term)
-                                  || TrackerDbContext.UnicodeLower(a.RoleTitle).Contains(term));
-        }
-
+        query = ApplySearch(query, filter.Search);
         query = Sort(query, filter.SortBy, filter.Descending);
 
         var rows = await query
@@ -61,6 +54,98 @@ public class ApplicationService(IDbContextFactory<TrackerDbContext> dbFactory, T
                 GetFollowUpState(r.CurrentStatus, r.FollowUpOn, today)))
             .ToList();
     }
+
+    /// <summary>
+    /// Every application matching <paramref name="search"/>, grouped for the pipeline board:
+    /// one column per open status (always present, in pipeline order) plus the closed ones.
+    /// </summary>
+    public async Task<BoardView> GetBoardAsync(string? search, CancellationToken ct = default)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        var query = ApplySearch(db.Applications.AsNoTracking(), search);
+
+        var rows = await query
+            .Select(a => new
+            {
+                a.Id,
+                CompanyName = a.Company.Name,
+                a.RoleTitle,
+                a.CurrentStatus,
+                a.Location,
+                a.SalaryRange,
+                a.AppliedOn,
+                a.FollowUpOn,
+                a.CreatedAt,
+                LastChangedAt = a.StatusHistory
+                    .OrderByDescending(s => s.ChangedAt)
+                    .Select(s => (DateTime?)s.ChangedAt)
+                    .FirstOrDefault(),
+            })
+            .ToListAsync(ct);
+
+        var today = Today;
+        var cards = rows
+            .Select(r => new
+            {
+                StageStartedUtc = r.LastChangedAt ?? r.CreatedAt,
+                Card = new BoardCard(
+                    r.Id, r.CompanyName, r.RoleTitle, r.CurrentStatus, r.Location, r.SalaryRange,
+                    r.AppliedOn, r.FollowUpOn,
+                    GetFollowUpState(r.CurrentStatus, r.FollowUpOn, today),
+                    GetDaysInStage(r.LastChangedAt ?? r.CreatedAt, today)),
+            })
+            .ToList();
+
+        var columns = ApplicationStatusExtensions.Pipeline
+            .Select(status => new BoardColumn(status, OrderOpenCards(cards.Select(c => c.Card).Where(c => c.Status == status))))
+            .ToList();
+
+        // Most recently closed first (by exact time, not whole days): those are the ones
+        // the user is most likely to look for.
+        var closed = cards
+            .Where(c => c.Card.Status.IsClosed())
+            .OrderByDescending(c => c.StageStartedUtc)
+            .ThenBy(c => c.Card.Id)
+            .Select(c => c.Card)
+            .ToList();
+
+        return new BoardView(columns, closed);
+    }
+
+    /// <summary>
+    /// Whole local calendar days since <paramref name="stageStartedUtc"/>; 0 on the day it started.
+    /// Never negative, even if the clock went backwards. Unspecified kind is treated as UTC
+    /// (as stored); a local time is rejected because it would be counted wrongly.
+    /// </summary>
+    public int GetDaysInStage(DateTime stageStartedUtc, DateOnly today)
+    {
+        if (stageStartedUtc.Kind == DateTimeKind.Local)
+        {
+            throw new ArgumentException("Timestamp must be UTC.", nameof(stageStartedUtc));
+        }
+
+        var local = TimeZoneInfo.ConvertTimeFromUtc(
+            DateTime.SpecifyKind(stageStartedUtc, DateTimeKind.Utc), time.LocalTimeZone);
+        return Math.Max(0, today.DayNumber - DateOnly.FromDateTime(local).DayNumber);
+    }
+
+    /// <summary>
+    /// Most urgent first: overdue (oldest first), due today, upcoming (soonest first), then no
+    /// follow-up date. Ties go to the card that has waited longest in its stage.
+    /// </summary>
+    private static List<BoardCard> OrderOpenCards(IEnumerable<BoardCard> cards) =>
+        cards
+            .OrderBy(c => c.FollowUpState switch
+            {
+                FollowUpState.Overdue => 0,
+                FollowUpState.DueToday => 1,
+                FollowUpState.Upcoming => 2,
+                _ => 3,
+            })
+            .ThenBy(c => c.FollowUpOn ?? DateOnly.MaxValue)
+            .ThenByDescending(c => c.DaysInStage)
+            .ThenBy(c => c.Id)
+            .ToList();
 
     /// <summary>The application's current values as form input, or null if it doesn't exist.</summary>
     public async Task<ApplicationInput?> GetForEditAsync(int id, CancellationToken ct = default)
@@ -234,6 +319,19 @@ public class ApplicationService(IDbContextFactory<TrackerDbContext> dbFactory, T
         var lowered = trimmed.ToLowerInvariant();
         return await db.Companies.FirstOrDefaultAsync(c => TrackerDbContext.UnicodeLower(c.Name) == lowered, ct)
             ?? new Company { Name = trimmed };
+    }
+
+    /// <summary>Matches company or role. Unicode-aware and literal: %, _ and \ have no special meaning.</summary>
+    private static IQueryable<JobApplication> ApplySearch(IQueryable<JobApplication> query, string? search)
+    {
+        if (string.IsNullOrWhiteSpace(search))
+        {
+            return query;
+        }
+
+        var term = search.Trim().ToLowerInvariant();
+        return query.Where(a => TrackerDbContext.UnicodeLower(a.Company.Name).Contains(term)
+                             || TrackerDbContext.UnicodeLower(a.RoleTitle).Contains(term));
     }
 
     private static IQueryable<JobApplication> Sort(IQueryable<JobApplication> query, ApplicationSort sortBy, bool descending) =>
