@@ -81,3 +81,4 @@ dotnet ef database update --project src/ApplicationTracker.Core --startup-projec
 - **test-writer**: writes and runs xUnit tests for new or changed logic.
 - **ui-ux-designer**: layout, accessibility and usability of the board, list, reminders and dashboard screens.
 - **job-search-helper**: non-code help: turns a job posting (pasted text or URL) into tracker fields, drafts follow-up messages and suggests next steps. It drafts only and never sends anything.
+- **agent-maintainer**: after a change that affects what agents need to know (a decision, a new helper/service/component, a new feature area, a convention or CLAUDE.md change), updates the files in `.claude/agents/` and reports any suggested new agents back to the main session. Edits agent files only; never creates agents or edits CLAUDE.md.
