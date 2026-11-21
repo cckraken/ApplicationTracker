@@ -66,6 +66,29 @@ public sealed record ApplicationSummary(
     DateOnly? FollowUpOn,
     FollowUpState FollowUpState);
 
+/// <summary>One card on the pipeline board.</summary>
+/// <param name="DaysInStage">Whole local days since the application entered its current status.</param>
+public sealed record BoardCard(
+    int Id,
+    string CompanyName,
+    string RoleTitle,
+    ApplicationStatus Status,
+    string? Location,
+    string? SalaryRange,
+    DateOnly? AppliedOn,
+    DateOnly? FollowUpOn,
+    FollowUpState FollowUpState,
+    int DaysInStage);
+
+/// <summary>One open-status column of the board, cards ordered most urgent first.</summary>
+public sealed record BoardColumn(ApplicationStatus Status, IReadOnlyList<BoardCard> Cards);
+
+/// <summary>
+/// The pipeline board: a column per open status in pipeline order (empty ones included),
+/// plus Rejected and Withdrawn applications together, most recently closed first.
+/// </summary>
+public sealed record BoardView(IReadOnlyList<BoardColumn> Columns, IReadOnlyList<BoardCard> Closed);
+
 public enum ApplicationSort
 {
     FollowUpOn,

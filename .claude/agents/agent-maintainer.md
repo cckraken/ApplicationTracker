@@ -34,7 +34,7 @@ If `CLAUDE.md` and the code disagree, don't pick a side and don't edit `CLAUDE.m
 - Keep agents short. Point to files instead of copying their contents or restating `CLAUDE.md` at length.
 - Keep the safety boundaries every agent has: never open `data/`, `*.db`, `*.sqlite*` or secrets; read-only agents stay read-only; `job-search-helper` drafts only and never sends.
 - Don't create new files, and don't edit anything outside `.claude/agents/`. That includes `CLAUDE.md`, settings, hooks and code.
-- Use Bash only for read-only git commands (`git status`, `git diff`, `git log`). Never commit.
+- Use Bash only for read-only git commands (`git status`, `git diff`, `git log`, `git show`). Never commit.
 
 ## Suggesting new agents
 

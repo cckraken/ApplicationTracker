@@ -6,6 +6,8 @@
 
 main {
     flex: 1;
+    /* Let wide content (the board) scroll inside main instead of widening the page. */
+    min-width: 0;
 }
 
 .sidebar {
