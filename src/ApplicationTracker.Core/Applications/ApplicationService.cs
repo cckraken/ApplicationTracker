@@ -232,20 +232,54 @@ public class ApplicationService(IDbContextFactory<TrackerDbContext> dbFactory, T
     }
 
     /// <returns>False if the application doesn't exist.</returns>
-    public async Task<bool> ChangeStatusAsync(int id, ApplicationStatus status, CancellationToken ct = default)
+    public async Task<bool> ChangeStatusAsync(int id, ApplicationStatus status, CancellationToken ct = default) =>
+        (await MoveToAsync(id, status, ct)).Outcome != MoveOutcome.NotFound;
+
+    /// <summary>Moves the application to <paramref name="status"/>; a no-op if it's already there.</summary>
+    public Task<MoveResult> MoveToAsync(int id, ApplicationStatus status, CancellationToken ct = default) =>
+        MoveAsync(id, _ => status, ct);
+
+    /// <summary>
+    /// One stage back or forward along the pipeline, from the status as stored now (not as a
+    /// possibly stale screen shows it). Unchanged at either end of the pipeline or when closed.
+    /// </summary>
+    public Task<MoveResult> MoveInPipelineAsync(int id, PipelineDirection direction, CancellationToken ct = default) =>
+        MoveAsync(id, direction switch
+        {
+            PipelineDirection.Back => current => current.PreviousInPipeline(),
+            PipelineDirection.Forward => current => current.NextInPipeline(),
+            _ => throw new ArgumentOutOfRangeException(nameof(direction), direction, "Unknown direction."),
+        }, ct);
+
+    /// <summary>
+    /// Closes the application as Rejected (the board's "drop on Closed"). An application that is
+    /// already closed keeps its status, so Withdrawn isn't turned into Rejected.
+    /// </summary>
+    public Task<MoveResult> CloseAsync(int id, CancellationToken ct = default) =>
+        MoveAsync(id, current => current.IsClosed() ? null : ApplicationStatus.Rejected, ct);
+
+    /// <summary>
+    /// Reads the stored status and applies the move in one context, so the target is always
+    /// worked out from the current status.
+    /// </summary>
+    /// <param name="targetFor">The new status given the current one; null means stay.</param>
+    private async Task<MoveResult> MoveAsync(
+        int id, Func<ApplicationStatus, ApplicationStatus?> targetFor, CancellationToken ct)
     {
         await using var db = await dbFactory.CreateDbContextAsync(ct);
         var app = await db.Applications.SingleOrDefaultAsync(a => a.Id == id, ct);
         if (app is null)
         {
-            return false;
+            return MoveResult.NotFound;
         }
 
-        if (app.ChangeStatus(status, UtcNow, Today))
+        if (targetFor(app.CurrentStatus) is not ApplicationStatus target || !app.ChangeStatus(target, UtcNow, Today))
         {
-            await db.SaveChangesAsync(ct);
+            return MoveResult.Unchanged(app.CurrentStatus);
         }
-        return true;
+
+        await db.SaveChangesAsync(ct);
+        return MoveResult.Moved(app.CurrentStatus);
     }
 
     /// <summary>Permanently deletes the application with its notes, history and reminders.</summary>

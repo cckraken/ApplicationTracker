@@ -66,6 +66,33 @@ public sealed record ApplicationSummary(
     DateOnly? FollowUpOn,
     FollowUpState FollowUpState);
 
+public enum PipelineDirection
+{
+    Back,
+    Forward,
+}
+
+public enum MoveOutcome
+{
+    /// <summary>The status changed and was saved.</summary>
+    Moved,
+
+    /// <summary>Nothing to do: already there, or no further stage in that direction.</summary>
+    Unchanged,
+
+    /// <summary>The application doesn't exist (deleted elsewhere).</summary>
+    NotFound,
+}
+
+/// <summary>What a move did. Create it with the factories, so Status is null only for NotFound.</summary>
+/// <param name="Status">The status the application has now; null when it wasn't found.</param>
+public sealed record MoveResult(MoveOutcome Outcome, ApplicationStatus? Status)
+{
+    public static MoveResult Moved(ApplicationStatus status) => new(MoveOutcome.Moved, status);
+    public static MoveResult Unchanged(ApplicationStatus status) => new(MoveOutcome.Unchanged, status);
+    public static MoveResult NotFound { get; } = new(MoveOutcome.NotFound, null);
+}
+
 /// <summary>One card on the pipeline board.</summary>
 /// <param name="DaysInStage">Whole local days since the application entered its current status.</param>
 public sealed record BoardCard(

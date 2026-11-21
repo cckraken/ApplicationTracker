@@ -91,10 +91,10 @@ else
         }
     </div>
 
-    <section class="board-closed @(dropTarget == ClosedDropStatus ? "is-drop-target" : "")" aria-labelledby="closed-heading"
-             @ondragenter="() => SetDropTarget(ClosedDropStatus)"
+    <section class="board-closed @(dropTarget == ClosedSectionKey ? "is-drop-target" : "")" aria-labelledby="closed-heading"
+             @ondragenter="() => SetDropTarget(ClosedSectionKey)"
              @ondragover:preventDefault
-             @ondrop="() => DropAsync(ClosedDropStatus)" @ondrop:preventDefault>
+             @ondrop="() => DropAsync(ClosedSectionKey)" @ondrop:preventDefault>
         <h2 id="closed-heading" class="board-column-heading justify-content-start mb-0">
             <button type="button" class="board-closed-toggle" aria-expanded="@(closedOpen ? "true" : "false")"
                     aria-controls="closed-cards" @onclick="() => closedOpen = !closedOpen">
@@ -123,9 +123,9 @@ else
 }
 
 @code {
-    // Dropping a card on the Closed section marks it Rejected (the common case;
-    // Withdrawn is in the card's "Move to…" menu).
-    private const ApplicationStatus ClosedDropStatus = ApplicationStatus.Rejected;
+    // A key only: marks the Closed section as the drag/drop target (no column uses Rejected).
+    // Which status a drop there sets is decided by Core's CloseAsync, not by this value.
+    private const ApplicationStatus ClosedSectionKey = ApplicationStatus.Rejected;
 
     private const string PrevButton = "prev";
     private const string NextButton = "next";
@@ -218,22 +218,26 @@ else
     private BoardCard? FindCard(int id) =>
         board?.Columns.SelectMany(c => c.Cards).Concat(board.Closed).FirstOrDefault(c => c.Id == id);
 
-    private Task MoveToAsync(int id, ApplicationStatus status, bool moveFocus = true) =>
-        MoveCoreAsync(id, _ => status, button: null, moveFocus);
+    private Task MoveCardToAsync(int id, ApplicationStatus status, bool moveFocus = true) =>
+        MoveCoreAsync(id, () => Applications.MoveToAsync(id, status), $"to {status}", button: null, moveFocus);
 
-    /// <summary>← / →: the target is worked out from the card's status when the move runs, not when clicked.</summary>
-    private Task MoveByArrowAsync(int id, string button) =>
-        MoveCoreAsync(id, s => button == PrevButton ? s.PreviousInPipeline() : s.NextInPipeline(), button, moveFocus: true);
+    /// <summary>← / →: Core works out the target from the stored status, so a stale card can't misdirect it.</summary>
+    private Task MoveByArrowAsync(int id, string button)
+    {
+        var direction = button == PrevButton ? PipelineDirection.Back : PipelineDirection.Forward;
+        return MoveCoreAsync(id, () => Applications.MoveInPipelineAsync(id, direction), direction.ToString(), button, moveFocus: true);
+    }
 
-    /// <param name="targetFor">The new status, given the card's current status; null means no move.</param>
+    /// <param name="move">The Core call that makes the move.</param>
+    /// <param name="description">What was attempted, for the log.</param>
     /// <param name="button">The arrow used, so focus can return to it; null focuses the card.</param>
     /// <param name="moveFocus">False for drag and drop, where the mouse user's focus is left alone.</param>
-    private async Task MoveCoreAsync(int id, Func<ApplicationStatus, ApplicationStatus?> targetFor, string? button, bool moveFocus)
+    private async Task MoveCoreAsync(int id, Func<Task<MoveResult>> move, string description, string? button, bool moveFocus)
     {
         openMenuId = null;
 
-        // Serialize moves and read the persisted status under the lock; a reload can
-        // fail or be superseded by a search without updating the displayed card.
+        // One move at a time, with the reload inside the lock, so announcements and focus
+        // follow the moves in order. Core decides the target from the stored status.
         await moveLock.WaitAsync();
         try
         {
@@ -242,44 +246,47 @@ else
                 return;
             }
 
-            var status = card.Status;
+            MoveResult result;
             try
             {
-                var current = await Applications.GetForEditAsync(id);
-                if (current is not null)
-                {
-                    if (targetFor(current.Status) is not ApplicationStatus target || target == current.Status)
-                    {
-                        return;
-                    }
-                    status = target;
-                }
-
-                if (current is null || !await Applications.ChangeStatusAsync(id, status))
-                {
-                    errorNotice = $"{card.RoleTitle} at {card.CompanyName} no longer exists. It may have been deleted elsewhere.";
-                    await LoadAsync();
-                    FocusCardOrSearch(id);
-                    return;
-                }
+                result = await move();
             }
             catch (Exception ex)
             {
-                Logger.LogError(ex, "Moving application {Id} to {Status} failed", id, status);
+                Logger.LogError(ex, "Moving application {Id} from {Status} ({Move}) failed", id, card.Status, description);
                 errorNotice = $"Couldn't move {card.RoleTitle} at {card.CompanyName}. Please try again.";
                 await LoadAsync();
                 FocusCardOrSearch(id);
                 return;
             }
 
+            if (result.Outcome == MoveOutcome.NotFound)
+            {
+                errorNotice = $"{card.RoleTitle} at {card.CompanyName} no longer exists. It may have been deleted elsewhere.";
+                await LoadAsync();
+                FocusCardOrSearch(id);
+                return;
+            }
+
             errorNotice = null;
+            var status = result.Status ?? throw new InvalidOperationException($"A {result.Outcome} move must report a status.");
+
+            // Unchanged and already shown correctly: nothing to do. Unchanged but the card was
+            // showing an old status: it jumps to where it really is, so treat it like a move.
+            if (result.Outcome == MoveOutcome.Unchanged && status == card.Status)
+            {
+                return;
+            }
+
             if (status.IsClosed())
             {
                 closedOpen = true; // Otherwise the card (and focus) would vanish into a collapsed section.
             }
 
             await LoadAsync();
-            announcement = $"{card.RoleTitle} at {card.CompanyName} moved to {status}.";
+            announcement = result.Outcome == MoveOutcome.Moved
+                ? $"{card.RoleTitle} at {card.CompanyName} moved to {status}."
+                : $"{card.RoleTitle} at {card.CompanyName} is in {status}.";
 
             if (moveFocus)
             {
@@ -322,8 +329,10 @@ else
 
         if (id is int cardId)
         {
-            // Dropping a closed card on Closed leaves it as it is (Withdrawn stays Withdrawn).
-            await MoveCoreAsync(cardId, current => current.IsClosed() && status.IsClosed() ? null : status,
+            // Dropping on Closed rejects an open application; Core leaves a closed one as it is.
+            await MoveCoreAsync(cardId,
+                status == ClosedSectionKey ? () => Applications.CloseAsync(cardId) : () => Applications.MoveToAsync(cardId, status),
+                status == ClosedSectionKey ? "close" : $"to {status}",
                 button: null, moveFocus: false);
         }
     }
@@ -473,7 +482,7 @@ else
                                     <li role="separator" class="move-menu-separator"></li>
                                 }
                                 <li>
-                                    <button type="button" class="move-menu-item" @onclick="() => MoveToAsync(card.Id, target)">@target</button>
+                                    <button type="button" class="move-menu-item" @onclick="() => MoveCardToAsync(card.Id, target)">@target</button>
                                 </li>
                             }
                         </ul>
