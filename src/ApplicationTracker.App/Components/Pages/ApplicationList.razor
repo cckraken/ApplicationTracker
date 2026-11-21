@@ -1,0 +1,498 @@
+@page "/applications"
+@implements IDisposable
+@inject ApplicationService Applications
+@inject NavigationManager Navigation
+@inject ILogger<ApplicationList> Logger
+
+<PageTitle>Applications</PageTitle>
+
+<h1 class="mb-3">Applications</h1>
+
+@if (notice is not null)
+{
+    @* Not a live region: dynamic changes are announced via the status paragraph below. *@
+    <div class="alert alert-success alert-dismissible">
+        @notice
+        <button type="button" class="btn-close" aria-label="Dismiss message" @onclick="() => notice = null"></button>
+    </div>
+}
+
+@if (errorNotice is not null)
+{
+    <div class="alert alert-danger alert-dismissible" role="alert">
+        @errorNotice
+        <button type="button" class="btn-close" aria-label="Dismiss error" @onclick="() => errorNotice = null"></button>
+    </div>
+}
+
+<div class="row g-2 align-items-end mb-3" role="search" aria-label="Filter applications">
+    <div class="col-sm-6 col-lg-5">
+        <label for="search" class="form-label">Search</label>
+        <input id="search" type="search" class="form-control" placeholder="Company or role" @ref="searchInput"
+               @bind="search" @bind:event="oninput" @bind:after="LoadAsync" />
+    </div>
+    <div class="col-sm-6 col-lg-3">
+        <label for="status-filter" class="form-label">Status</label>
+        <select id="status-filter" class="form-select" @bind="statusFilter" @bind:after="LoadAsync">
+            <option value="">@(includeClosed ? "All" : "All active")</option>
+            @foreach (var status in Enum.GetValues<ApplicationStatus>())
+            {
+                <option value="@status">@status</option>
+            }
+        </select>
+    </div>
+    <div class="col-lg-4">
+        <div class="form-check mb-lg-2">
+            <input id="include-closed" type="checkbox" class="form-check-input"
+                   @bind="includeClosed" @bind:after="LoadAsync" disabled="@StatusFilterActive"
+                   aria-describedby="@(StatusFilterActive ? "include-closed-hint" : null)" />
+            <label for="include-closed" class="form-check-label">Show rejected and withdrawn</label>
+            @if (StatusFilterActive)
+            {
+                <div id="include-closed-hint" class="form-text mt-0">Not used while a status is selected.</div>
+            }
+        </div>
+    </div>
+</div>
+
+<p class="visually-hidden" role="status" aria-live="polite">@announcement</p>
+
+@if (rows is null)
+{
+    <p>Loading…</p>
+}
+else if (rows.Count == 0)
+{
+    <div class="empty-state" tabindex="-1" @ref="resultsSummary">
+        @if (HasFilters)
+        {
+            <h2 class="h5">No applications match these filters</h2>
+            <p>Try a different search or status.</p>
+            <button type="button" class="btn btn-outline-primary" @onclick="ClearFiltersAsync">Clear filters</button>
+        }
+        else if (hasClosedOnly)
+        {
+            <h2 class="h5">No active applications</h2>
+            <p>Everything here has been rejected or withdrawn.</p>
+            <div class="d-flex flex-wrap justify-content-center gap-2">
+                <button type="button" class="btn btn-outline-primary" @onclick="ShowClosedAsync">Show rejected and withdrawn</button>
+                <a class="btn btn-primary" href="applications/new">Add application</a>
+            </div>
+        }
+        else
+        {
+            <h2 class="h5">No applications yet</h2>
+            <p>Add a job you have applied for, or one you are thinking about. Give it a follow-up date and it will be flagged here when it needs attention.</p>
+            <a class="btn btn-primary" href="applications/new">Add your first application</a>
+        }
+    </div>
+}
+else
+{
+    <p id="results-summary" class="results-summary" tabindex="-1" @ref="resultsSummary">
+        @rows.Count @(rows.Count == 1 ? "application" : "applications")
+        @if (OverdueCount > 0)
+        {
+            <span aria-hidden="true"> · </span><span class="visually-hidden">, </span>
+            <span class="followup-date-overdue">@OverdueCount overdue</span>
+        }
+        @if (DueTodayCount > 0)
+        {
+            <span aria-hidden="true"> · </span><span class="visually-hidden">, </span>
+            <span class="followup-date-due-today">@DueTodayCount due today</span>
+        }
+    </p>
+
+    <div class="table-responsive">
+        <table class="table table-hover application-table" aria-labelledby="results-summary">
+            <thead>
+                <tr>
+                    @SortHeader("Company", ApplicationSort.Company)
+                    @SortHeader("Role", ApplicationSort.Role)
+                    @SortHeader("Status", ApplicationSort.Status)
+                    @SortHeader("Applied", ApplicationSort.AppliedOn)
+                    @SortHeader("Follow up", ApplicationSort.FollowUpOn)
+                    <th scope="col"><span class="visually-hidden">Actions</span></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var row in rows)
+                {
+                    var shownStatus = DisplayedStatus(row);
+                    <tr @key="row.Id" class="@RowClass(row)">
+                        <th scope="row" class="fw-normal cell-wrap">@row.CompanyName</th>
+                        <td class="cell-wrap">
+                            <a href="applications/@row.Id/edit">@row.RoleTitle</a>
+                            @if (!string.IsNullOrEmpty(row.Location))
+                            {
+                                <div class="small text-body-secondary">@row.Location</div>
+                            }
+                        </td>
+                        <td>
+                            @* One control: shows the status (token colour + text) and changes it. *@
+                            <select class="form-select form-select-sm status-select @StatusBadge.CssClassFor(shownStatus)"
+                                    aria-label="@($"Status of {row.RoleTitle} at {row.CompanyName}")"
+                                    value="@shownStatus"
+                                    @onchange="e => OnStatusChangedAsync(row, e)"
+                                    @onblur="() => CommitPendingStatusAsync(fromBlur: true)">
+                                @foreach (var status in Enum.GetValues<ApplicationStatus>())
+                                {
+                                    <option value="@status">@status</option>
+                                }
+                            </select>
+                        </td>
+                        <td>@DateText(row.AppliedOn)</td>
+                        <td>
+                            <div class="d-flex flex-wrap align-items-center gap-1">
+                                @DateText(row.FollowUpOn, FollowUpDateClass(row.FollowUpState))
+                                <FollowUpBadge State="row.FollowUpState" />
+                            </div>
+                        </td>
+                        <td class="text-end actions-cell">
+                            @if (pendingDeleteId == row.Id)
+                            {
+                                <div class="d-inline-flex flex-wrap align-items-center justify-content-end gap-1"
+                                     role="group" aria-labelledby="@($"delete-confirm-{row.Id}")"
+                                     @onkeydown="e => OnConfirmKeyDown(e, row)">
+                                    <span id="@($"delete-confirm-{row.Id}")" class="me-1">
+                                        <span aria-hidden="true">Delete permanently?</span>
+                                        <span class="visually-hidden">Delete @row.RoleTitle at @row.CompanyName permanently?</span>
+                                    </span>
+                                    <button type="button" class="btn btn-sm btn-danger" @onclick="() => DeleteAsync(row)">Delete</button>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" @ref="confirmCancelButton"
+                                            @onclick="() => CancelDelete(row)">Cancel</button>
+                                </div>
+                            }
+                            else
+                            {
+                                <div class="d-inline-flex gap-1">
+                                    <a class="btn btn-sm btn-outline-primary" href="applications/@row.Id/edit"
+                                       aria-label="@($"Edit {row.RoleTitle} at {row.CompanyName}")">Edit</a>
+                                    <button type="button" class="btn btn-sm btn-outline-danger" @ref="deleteButtons[row.Id]"
+                                            @onclick="() => RequestDelete(row)"
+                                            aria-label="@($"Delete {row.RoleTitle} at {row.CompanyName}")">Delete</button>
+                                </div>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    // Native selects fire "change" on every arrow key press when closed (Chrome/Firefox on Windows).
+    // Saving each one would write a status-history entry per keystroke, so a choice is saved
+    // after this pause, or straight away when focus leaves the dropdown.
+    private static readonly TimeSpan StatusSaveDelay = TimeSpan.FromSeconds(1.5);
+
+    /// <summary>Id of an application that was just added or edited; shows a confirmation.</summary>
+    [SupplyParameterFromQuery(Name = "saved")]
+    public int? SavedId { get; set; }
+
+    private IReadOnlyList<ApplicationSummary>? rows;
+    private string search = "";
+    private string statusFilter = "";
+    private bool includeClosed;
+    private bool hasClosedOnly;
+    private ApplicationSort sortBy = ApplicationSort.FollowUpOn;
+    private bool descending;
+    private int? pendingDeleteId;
+    private string announcement = "";
+    private string? notice;
+    private string? errorNotice;
+    private int loadVersion;
+
+    private (int Id, ApplicationStatus Status)? pendingStatus;
+    private CancellationTokenSource? statusTimer;
+
+    // Status saves run one at a time, so a timer save and a blur save can't overlap
+    // and record two history entries from the same starting status.
+    private readonly SemaphoreSlim saveLock = new(1, 1);
+    private IDisposable? locationChangingRegistration;
+
+    private ElementReference searchInput;
+    private ElementReference resultsSummary;
+    private ElementReference confirmCancelButton;
+    private readonly Dictionary<int, ElementReference> deleteButtons = new();
+    private Func<ValueTask>? focusAfterRender;
+
+    private bool StatusFilterActive => !string.IsNullOrEmpty(statusFilter);
+    private bool HasFilters => !string.IsNullOrWhiteSpace(search) || StatusFilterActive;
+    private int OverdueCount => rows?.Count(r => r.FollowUpState == FollowUpState.Overdue) ?? 0;
+    private int DueTodayCount => rows?.Count(r => r.FollowUpState == FollowUpState.DueToday) ?? 0;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+
+        if (SavedId is int savedId)
+        {
+            var saved = rows?.FirstOrDefault(r => r.Id == savedId);
+            notice = saved is not null
+                ? $"Saved {saved.RoleTitle} at {saved.CompanyName}."
+                : "Application saved. It is not shown because rejected and withdrawn applications are hidden.";
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            // Leaving the page inside the save delay: finish the save before navigating,
+            // so the next page shows the new status and any error is visible here.
+            locationChangingRegistration = Navigation.RegisterLocationChangingHandler(
+                async _ => await CommitPendingStatusAsync(fromBlur: true));
+        }
+
+        if (focusAfterRender is { } focus)
+        {
+            focusAfterRender = null;
+            try
+            {
+                await focus();
+            }
+            catch (JSException)
+            {
+                // The element went away before it could be focused; nothing useful to do.
+            }
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        // Typing in the search box can start several loads; only the newest one wins.
+        var version = ++loadVersion;
+        var result = await Applications.ListAsync(new ApplicationFilter
+        {
+            Search = search,
+            Status = Enum.TryParse<ApplicationStatus>(statusFilter, out var status) ? status : null,
+            IncludeClosed = includeClosed,
+            SortBy = sortBy,
+            Descending = descending,
+        });
+
+        // An empty active list may still hide rejected/withdrawn ones; say so rather than
+        // showing the first-run message. (A Core count/any query would be cheaper; see report.)
+        var closedOnly = false;
+        if (result.Count == 0 && !HasFilters && !includeClosed)
+        {
+            var all = await Applications.ListAsync(new ApplicationFilter { IncludeClosed = true });
+            closedOnly = all.Count > 0;
+        }
+
+        if (version == loadVersion)
+        {
+            rows = result;
+            hasClosedOnly = closedOnly;
+        }
+    }
+
+    private async Task SortAsync(string label, ApplicationSort column)
+    {
+        descending = sortBy == column && !descending;
+        sortBy = column;
+        await LoadAsync();
+        announcement = $"Sorted by {label}, {(descending ? "descending" : "ascending")}.";
+    }
+
+    private async Task ClearFiltersAsync()
+    {
+        search = "";
+        statusFilter = "";
+        await LoadAsync();
+        announcement = "Filters cleared.";
+        focusAfterRender = () => searchInput.FocusAsync();
+    }
+
+    private async Task ShowClosedAsync()
+    {
+        includeClosed = true;
+        await LoadAsync();
+        focusAfterRender = () => resultsSummary.FocusAsync();
+    }
+
+    private ApplicationStatus DisplayedStatus(ApplicationSummary row) =>
+        pendingStatus is { } pending && pending.Id == row.Id ? pending.Status : row.Status;
+
+    private async Task OnStatusChangedAsync(ApplicationSummary row, ChangeEventArgs e)
+    {
+        if (!Enum.TryParse<ApplicationStatus>(e.Value?.ToString(), out var status))
+        {
+            return;
+        }
+
+        pendingStatus = (row.Id, status);
+        statusTimer?.Cancel();
+        var timer = statusTimer = new CancellationTokenSource();
+
+        try
+        {
+            await Task.Delay(StatusSaveDelay, timer.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            return; // A newer choice, a blur or leaving the page took over.
+        }
+
+        await CommitPendingStatusAsync(fromBlur: false);
+    }
+
+    private async Task CommitPendingStatusAsync(bool fromBlur)
+    {
+        if (pendingStatus is not { } pending)
+        {
+            return;
+        }
+
+        pendingStatus = null;
+        statusTimer?.Cancel();
+
+        var row = rows?.FirstOrDefault(r => r.Id == pending.Id);
+        if (row is null || row.Status == pending.Status)
+        {
+            return;
+        }
+
+        await saveLock.WaitAsync();
+        try
+        {
+            // The service ignores a change to the status the application already has.
+            if (!await Applications.ChangeStatusAsync(row.Id, pending.Status))
+            {
+                errorNotice = $"{row.RoleTitle} at {row.CompanyName} no longer exists. It may have been deleted elsewhere.";
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Saving status {Status} for application {Id} failed", pending.Status, row.Id);
+            errorNotice = $"Couldn't change the status of {row.RoleTitle} at {row.CompanyName}. Please try again.";
+            await LoadAsync();
+            return;
+        }
+        finally
+        {
+            saveLock.Release();
+        }
+
+        await LoadAsync();
+
+        var stillShown = rows?.Any(r => r.Id == row.Id) == true;
+        announcement = stillShown
+            ? $"{row.RoleTitle} at {row.CompanyName} moved to {pending.Status}."
+            : $"{row.RoleTitle} at {row.CompanyName} moved to {pending.Status}. It is now hidden by the current filters.";
+
+        if (!stillShown)
+        {
+            notice = $"Moved {row.RoleTitle} at {row.CompanyName} to {pending.Status}. It is hidden by the current filters.";
+
+            // The focused dropdown just disappeared; put focus somewhere sensible.
+            // After a blur, focus has already moved on deliberately, so leave it alone.
+            if (!fromBlur)
+            {
+                focusAfterRender = () => resultsSummary.FocusAsync();
+            }
+        }
+    }
+
+    private void RequestDelete(ApplicationSummary row)
+    {
+        pendingDeleteId = row.Id;
+        focusAfterRender = () => confirmCancelButton.FocusAsync();
+    }
+
+    private void CancelDelete(ApplicationSummary row)
+    {
+        pendingDeleteId = null;
+        focusAfterRender = () => deleteButtons.TryGetValue(row.Id, out var button)
+            ? button.FocusAsync()
+            : ValueTask.CompletedTask;
+    }
+
+    private void OnConfirmKeyDown(KeyboardEventArgs e, ApplicationSummary row)
+    {
+        if (e.Key == "Escape")
+        {
+            CancelDelete(row);
+        }
+    }
+
+    private async Task DeleteAsync(ApplicationSummary row)
+    {
+        try
+        {
+            await Applications.DeleteAsync(row.Id);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Deleting application {Id} failed", row.Id);
+            pendingDeleteId = null;
+            errorNotice = $"Couldn't delete {row.RoleTitle} at {row.CompanyName}. Please try again.";
+            await LoadAsync();
+            return;
+        }
+
+        pendingDeleteId = null;
+        deleteButtons.Remove(row.Id);
+        announcement = $"Deleted {row.RoleTitle} at {row.CompanyName}.";
+        await LoadAsync();
+        focusAfterRender = () => resultsSummary.FocusAsync();
+    }
+
+    public void Dispose()
+    {
+        locationChangingRegistration?.Dispose();
+        statusTimer?.Cancel();
+        statusTimer?.Dispose();
+
+        // Last resort when the tab is closed inside the save delay (in-app navigation is
+        // handled by the location-changing handler). Nobody can see an error now, so log it.
+        if (pendingStatus is { } pending)
+        {
+            pendingStatus = null;
+            _ = Applications.ChangeStatusAsync(pending.Id, pending.Status).ContinueWith(
+                t => Logger.LogError(t.Exception, "Saving status {Status} for application {Id} on close failed", pending.Status, pending.Id),
+                TaskContinuationOptions.OnlyOnFaulted);
+        }
+    }
+
+    private RenderFragment SortHeader(string label, ApplicationSort column) => __builder =>
+    {
+        var active = sortBy == column;
+        <th scope="col" aria-sort="@(active ? (descending ? "descending" : "ascending") : null)">
+            <button type="button" class="sort-button" @onclick="() => SortAsync(label, column)">
+                @label
+                <span class="sort-indicator @(active ? "is-active" : "")" aria-hidden="true">@(active ? (descending ? "▼" : "▲") : "↕")</span>
+            </button>
+        </th>
+    };
+
+    private RenderFragment DateText(DateOnly? date, string? cssClass = null) => __builder =>
+    {
+        if (date is DateOnly value)
+        {
+            <span class="text-nowrap @cssClass">@value.ToString("d MMM yyyy")</span>
+        }
+        else
+        {
+            <span aria-hidden="true">—</span>
+            <span class="visually-hidden">Not set</span>
+        }
+    };
+
+    private static string RowClass(ApplicationSummary row) => row switch
+    {
+        _ when row.Status.IsClosed() => "row-closed",
+        { FollowUpState: FollowUpState.Overdue } => "row-overdue",
+        { FollowUpState: FollowUpState.DueToday } => "row-due-today",
+        _ => "",
+    };
+
+    private static string? FollowUpDateClass(FollowUpState state) => state switch
+    {
+        FollowUpState.Overdue => "followup-date-overdue",
+        FollowUpState.DueToday => "followup-date-due-today",
+        _ => null,
+    };
+}

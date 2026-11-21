@@ -37,8 +37,14 @@ public class JobApplication
     /// <see cref="StatusHistory"/>. Moving to the current status is a no-op.
     /// Any transition is allowed: real hiring processes skip and repeat stages.
     /// </summary>
+    /// <param name="utcNow">When the change happened, in UTC (stored in the history).</param>
+    /// <param name="localToday">
+    /// The user's local calendar date, used to fill in <see cref="AppliedOn"/>. This is passed
+    /// separately because the UTC date can differ from the local date late in the evening or
+    /// early in the morning.
+    /// </param>
     /// <returns>True if the status changed.</returns>
-    public bool ChangeStatus(ApplicationStatus newStatus, DateTime utcNow)
+    public bool ChangeStatus(ApplicationStatus newStatus, DateTime utcNow, DateOnly localToday)
     {
         if (utcNow.Kind != DateTimeKind.Utc)
         {
@@ -59,7 +65,7 @@ public class JobApplication
 
         if (newStatus == ApplicationStatus.Applied && AppliedOn is null)
         {
-            AppliedOn = DateOnly.FromDateTime(utcNow);
+            AppliedOn = localToday;
         }
 
         CurrentStatus = newStatus;

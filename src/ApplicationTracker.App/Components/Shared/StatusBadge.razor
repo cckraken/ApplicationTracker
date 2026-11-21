@@ -1,0 +1,20 @@
+@* Consistent colour plus text label for a pipeline status (never colour alone).
+   Colours come from the status tokens in wwwroot/app.css. *@
+<span class="status-badge @CssClassFor(Status)">@Status</span>
+
+@code {
+    [Parameter, EditorRequired] public ApplicationStatus Status { get; set; }
+
+    /// <summary>The token class for a status, shared with other status-coloured controls.</summary>
+    public static string CssClassFor(ApplicationStatus status) => status switch
+    {
+        ApplicationStatus.Wishlist => "status-wishlist",
+        ApplicationStatus.Applied => "status-applied",
+        ApplicationStatus.Screening => "status-screening",
+        ApplicationStatus.Interview => "status-interview",
+        ApplicationStatus.Offer => "status-offer",
+        ApplicationStatus.Rejected => "status-rejected",
+        ApplicationStatus.Withdrawn => "status-withdrawn",
+        _ => "",
+    };
+}

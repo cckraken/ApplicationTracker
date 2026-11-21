@@ -1,0 +1,43 @@
+@page "/applications/new"
+@using System.ComponentModel.DataAnnotations
+@inject ApplicationService Applications
+@inject NavigationManager Navigation
+
+<PageTitle>Add application</PageTitle>
+
+<h1>Add application</h1>
+
+<ApplicationForm Model="model" CompanyNames="companyNames" SubmitLabel="Save application"
+                 Busy="saving" Error="error" OnValidSubmit="SaveAsync" OnCancel="Cancel" />
+
+@code {
+    private readonly ApplicationInput model = new();
+    private IReadOnlyList<string> companyNames = [];
+    private bool saving;
+    private string? error;
+
+    protected override async Task OnInitializedAsync() =>
+        companyNames = await Applications.GetCompanyNamesAsync();
+
+    private async Task SaveAsync()
+    {
+        saving = true;
+        error = null;
+        try
+        {
+            var id = await Applications.CreateAsync(model);
+            // The list shows a "Saved ..." confirmation for this id.
+            Navigation.NavigateTo($"applications?saved={id}");
+        }
+        catch (ValidationException ex)
+        {
+            error = ex.Message;
+        }
+        finally
+        {
+            saving = false;
+        }
+    }
+
+    private void Cancel() => Navigation.NavigateTo("applications");
+}

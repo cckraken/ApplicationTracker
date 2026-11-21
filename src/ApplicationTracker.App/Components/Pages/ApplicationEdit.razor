@@ -1,0 +1,72 @@
+@page "/applications/{Id:int}/edit"
+@using System.ComponentModel.DataAnnotations
+@inject ApplicationService Applications
+@inject NavigationManager Navigation
+
+<PageTitle>@(heading ?? "Edit application")</PageTitle>
+
+@if (loading)
+{
+    <p>Loading…</p>
+}
+else if (model is null)
+{
+    <h1>Application not found</h1>
+    <p>It may have been deleted. <a href="applications">Back to applications</a></p>
+}
+else
+{
+    <h1 class="text-break">@heading</h1>
+    <ApplicationForm Model="model" CompanyNames="companyNames" SubmitLabel="Save changes"
+                     Busy="saving" Error="error" OnValidSubmit="SaveAsync" OnCancel="Cancel" />
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private ApplicationInput? model;
+    private IReadOnlyList<string> companyNames = [];
+    private bool loading = true;
+    private bool saving;
+    private string? error;
+
+    // Taken from the saved values, so it doesn't change while typing.
+    private string? heading;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        loading = true;
+        model = await Applications.GetForEditAsync(Id);
+        companyNames = await Applications.GetCompanyNamesAsync();
+        heading = model is null ? null : $"Edit {model.RoleTitle} at {model.Company}";
+        loading = false;
+    }
+
+    private async Task SaveAsync()
+    {
+        saving = true;
+        error = null;
+        try
+        {
+            if (await Applications.UpdateAsync(Id, model!))
+            {
+                // The list shows a "Saved ..." confirmation for this id.
+                Navigation.NavigateTo($"applications?saved={Id}");
+            }
+            else
+            {
+                model = null;
+            }
+        }
+        catch (ValidationException ex)
+        {
+            error = ex.Message;
+        }
+        finally
+        {
+            saving = false;
+        }
+    }
+
+    private void Cancel() => Navigation.NavigateTo("applications");
+}

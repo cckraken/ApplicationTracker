@@ -5,6 +5,7 @@ namespace ApplicationTracker.Tests.Domain;
 public class JobApplicationTests
 {
     private static readonly DateTime Now = new(2026, 11, 21, 9, 30, 0, DateTimeKind.Utc);
+    private static readonly DateOnly Today = new(2026, 11, 21);
 
     private static JobApplication NewApplication() => new() { RoleTitle = "Data Analyst" };
 
@@ -22,7 +23,7 @@ public class JobApplicationTests
     {
         var app = NewApplication();
 
-        var changed = app.ChangeStatus(ApplicationStatus.Applied, Now);
+        var changed = app.ChangeStatus(ApplicationStatus.Applied, Now, Today);
 
         Assert.True(changed);
         Assert.Equal(ApplicationStatus.Applied, app.CurrentStatus);
@@ -37,9 +38,9 @@ public class JobApplicationTests
     public void ChangeStatus_SameStatus_IsNoOp()
     {
         var app = NewApplication();
-        app.ChangeStatus(ApplicationStatus.Applied, Now);
+        app.ChangeStatus(ApplicationStatus.Applied, Now, Today);
 
-        var changed = app.ChangeStatus(ApplicationStatus.Applied, Now.AddHours(1));
+        var changed = app.ChangeStatus(ApplicationStatus.Applied, Now.AddHours(1), Today);
 
         Assert.False(changed);
         Assert.Single(app.StatusHistory);
@@ -51,9 +52,22 @@ public class JobApplicationTests
     {
         var app = NewApplication();
 
-        app.ChangeStatus(ApplicationStatus.Applied, Now);
+        app.ChangeStatus(ApplicationStatus.Applied, Now, Today);
 
         Assert.Equal(new DateOnly(2026, 11, 21), app.AppliedOn);
+    }
+
+    [Fact]
+    public void ChangeStatus_ToApplied_UsesLocalDateNotUtcDate()
+    {
+        var app = NewApplication();
+        var lateUtcEvening = new DateTime(2026, 11, 21, 23, 30, 0, DateTimeKind.Utc);
+
+        // In a UTC+1 zone it is already 22 November locally.
+        app.ChangeStatus(ApplicationStatus.Applied, lateUtcEvening, new DateOnly(2026, 11, 22));
+
+        Assert.Equal(new DateOnly(2026, 11, 22), app.AppliedOn);
+        Assert.Equal(lateUtcEvening, app.StatusHistory.Single().ChangedAt);
     }
 
     [Fact]
@@ -62,7 +76,7 @@ public class JobApplicationTests
         var app = NewApplication();
         app.AppliedOn = new DateOnly(2026, 11, 1);
 
-        app.ChangeStatus(ApplicationStatus.Applied, Now);
+        app.ChangeStatus(ApplicationStatus.Applied, Now, Today);
 
         Assert.Equal(new DateOnly(2026, 11, 1), app.AppliedOn);
     }
@@ -71,9 +85,9 @@ public class JobApplicationTests
     public void ChangeStatus_CanSkipStages()
     {
         var app = NewApplication();
-        app.ChangeStatus(ApplicationStatus.Applied, Now);
+        app.ChangeStatus(ApplicationStatus.Applied, Now, Today);
 
-        app.ChangeStatus(ApplicationStatus.Interview, Now.AddDays(3));
+        app.ChangeStatus(ApplicationStatus.Interview, Now.AddDays(3), Today.AddDays(3));
 
         Assert.Equal(ApplicationStatus.Interview, app.CurrentStatus);
         Assert.Equal(2, app.StatusHistory.Count);
@@ -87,7 +101,7 @@ public class JobApplicationTests
         var app = NewApplication();
 
         Assert.Throws<ArgumentException>(() =>
-            app.ChangeStatus(ApplicationStatus.Applied, DateTime.SpecifyKind(Now, kind)));
+            app.ChangeStatus(ApplicationStatus.Applied, DateTime.SpecifyKind(Now, kind), Today));
     }
 
     [Theory]

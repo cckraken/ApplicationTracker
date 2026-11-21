@@ -1,0 +1,15 @@
+@* Flags follow-ups that need attention. Upcoming and none render nothing.
+   Overdue is a solid fill (loudest); due today is a soft fill (calmer). *@
+@switch (State)
+{
+    case FollowUpState.Overdue:
+        <span class="followup-badge followup-overdue">Overdue</span>
+        break;
+    case FollowUpState.DueToday:
+        <span class="followup-badge followup-due-today">Due today</span>
+        break;
+}
+
+@code {
+    [Parameter, EditorRequired] public FollowUpState State { get; set; }
+}

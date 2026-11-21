@@ -45,28 +45,33 @@ Nice-to-have later: import a job posting from a URL or pasted text, CSV export, 
 - Async all the way for I/O (`ToListAsync`, `SaveChangesAsync`); pass `CancellationToken` where available.
 - Every schema change gets an EF migration; never edit an applied migration.
 - Store timestamps in UTC; convert to local time only in the UI.
-- Keep business rules (status transitions, overdue logic, stats) in `Core`, not in UI components, so they can be unit tested.
+- Keep business rules (status transitions, overdue logic, stats) in `Core`, not in UI components, so they can be unit tested. UI pages talk to Core services (e.g. `ApplicationService`), never to `TrackerDbContext` directly.
+- Get "now" and "today" from the injected `TimeProvider` (`ApplicationService.Today` is the local date); tests use `FakeTimeProvider`.
 - Code style follows `dotnet format`. A hook runs it on every `.cs` file Claude edits.
 - New logic comes with tests. Run `dotnet test` before saying a change is done.
 - Small, focused commits with descriptive messages. Commit only when asked.
 
 ## Commands
 
-Run from the repo root. The app applies pending migrations on startup and creates `data/tracker.db` if missing.
+Run from the repo root. The app applies pending migrations on startup and creates its database file if missing.
 
 ```powershell
 dotnet restore
 dotnet build
 dotnet test
-dotnet run --project src/ApplicationTracker.App
+dotnet run --project src/ApplicationTracker.App   # Development: data/tracker.dev.db with demo data
+powershell -ExecutionPolicy Bypass -File .\run.ps1 # Real use: data/tracker.db, http://localhost:5180
 dotnet ef migrations add <Name> --project src/ApplicationTracker.Core --startup-project src/ApplicationTracker.App
 dotnet ef database update --project src/ApplicationTracker.Core --startup-project src/ApplicationTracker.App
 ```
 
 ## Data rules
 
-- The live database lives in `data/` (for example `data/tracker.db`) and is gitignored.
-- It holds real personal job-search data: **do not read, query, copy or commit it**. Settings deny Claude access to `data/`, `*.db` and `*.sqlite*` files.
+- Databases live in the repo-root `data/` folder, which is gitignored:
+  - `data/tracker.db` is the **real** database. Only `run.ps1` uses it, by passing `--Tracker:DatabaseFile tracker.db`; every other way of starting the app (including `dotnet ef`) gets the dev database.
+  - `data/tracker.dev.db` is the default/Development database, seeded with fictional demo data by `DemoDataSeeder` when empty (Development only). Delete it to reseed.
+- Always develop and test against Development mode, never the real database.
+- The real database holds personal job-search data: **do not read, query, copy or commit it**. Settings deny Claude access to `data/`, `*.db` and `*.sqlite*` files.
 - Use seed data / test fixtures for development and tests.
 - Secrets and local overrides (`.env*`, `appsettings.*.local.json`, `secrets.json`) are also off-limits and gitignored.
 

@@ -1,0 +1,111 @@
+@* Shared add/edit form. The page owns saving; this only collects and validates input. *@
+<EditForm Model="Model" OnValidSubmit="OnValidSubmit" FormName="application" novalidate>
+    <DataAnnotationsValidator />
+
+    @if (!string.IsNullOrEmpty(Error))
+    {
+        <div class="alert alert-danger" role="alert">@Error</div>
+    }
+
+    <p class="form-text mt-0 mb-3">
+        Fields marked <span class="required-mark" aria-hidden="true">*</span><span class="visually-hidden">as required</span>
+        must be filled in. Everything else can be added later.
+    </p>
+
+    <fieldset class="form-section">
+        <legend>Job</legend>
+        <div class="row g-3">
+            <div class="col-md-6">
+                <label for="company" class="form-label">Company <span class="required-mark" aria-hidden="true">*</span></label>
+                <InputText id="company" class="form-control" @bind-Value="Model.Company" list="company-names" autocomplete="off"
+                           aria-required="true" aria-describedby="company-error" />
+                <datalist id="company-names">
+                    @foreach (var name in CompanyNames)
+                    {
+                        <option value="@name"></option>
+                    }
+                </datalist>
+                <div id="company-error"><ValidationMessage For="() => Model.Company" /></div>
+            </div>
+
+            <div class="col-md-6">
+                <label for="role" class="form-label">Role <span class="required-mark" aria-hidden="true">*</span></label>
+                <InputText id="role" class="form-control" @bind-Value="Model.RoleTitle"
+                           aria-required="true" aria-describedby="role-error" />
+                <div id="role-error"><ValidationMessage For="() => Model.RoleTitle" /></div>
+            </div>
+        </div>
+    </fieldset>
+
+    <fieldset class="form-section">
+        <legend>Progress</legend>
+        <div class="row g-3">
+            <div class="col-md-4">
+                <label for="status" class="form-label">Status</label>
+                <InputSelect id="status" class="form-select" @bind-Value="Model.Status">
+                    @foreach (var status in Enum.GetValues<ApplicationStatus>())
+                    {
+                        <option value="@status">@status</option>
+                    }
+                </InputSelect>
+            </div>
+
+            <div class="col-md-4">
+                <label for="follow-up-on" class="form-label">Follow up on</label>
+                <InputDate id="follow-up-on" class="form-control" @bind-Value="Model.FollowUpOn" aria-describedby="follow-up-on-help" />
+                <div id="follow-up-on-help" class="form-text">Flagged on the Today page and the list when it's due.</div>
+            </div>
+
+            <div class="col-md-4">
+                <label for="applied-on" class="form-label">Applied on</label>
+                <InputDate id="applied-on" class="form-control" @bind-Value="Model.AppliedOn" aria-describedby="applied-on-help" />
+                <div id="applied-on-help" class="form-text">If left empty, it's filled in when the status changes to Applied.</div>
+            </div>
+        </div>
+    </fieldset>
+
+    <fieldset class="form-section">
+        <legend>Details <span class="fw-normal text-body-secondary">(optional)</span></legend>
+        <div class="row g-3">
+            <div class="col-12">
+                <label for="posting-url" class="form-label">Posting link</label>
+                <InputText id="posting-url" type="url" class="form-control" @bind-Value="Model.PostingUrl" placeholder="https://"
+                           aria-describedby="posting-url-error" />
+                <div id="posting-url-error"><ValidationMessage For="() => Model.PostingUrl" /></div>
+            </div>
+
+            <div class="col-md-4">
+                <label for="location" class="form-label">Location</label>
+                <InputText id="location" class="form-control" @bind-Value="Model.Location" placeholder="e.g. Remote, Hybrid, Leeds" />
+                <ValidationMessage For="() => Model.Location" />
+            </div>
+
+            <div class="col-md-4">
+                <label for="salary" class="form-label">Salary range</label>
+                <InputText id="salary" class="form-control" @bind-Value="Model.SalaryRange" />
+                <ValidationMessage For="() => Model.SalaryRange" />
+            </div>
+
+            <div class="col-md-4">
+                <label for="source" class="form-label">Source</label>
+                <InputText id="source" class="form-control" @bind-Value="Model.Source" placeholder="e.g. LinkedIn, referral" />
+                <ValidationMessage For="() => Model.Source" />
+            </div>
+        </div>
+    </fieldset>
+
+    <div class="d-flex flex-wrap gap-2">
+        <button type="submit" class="btn btn-primary" disabled="@Busy">@(Busy ? "Saving…" : SubmitLabel)</button>
+        <button type="button" class="btn btn-outline-secondary" @onclick="OnCancel" disabled="@Busy">Cancel</button>
+    </div>
+</EditForm>
+
+@code {
+    [Parameter, EditorRequired] public ApplicationInput Model { get; set; } = default!;
+    [Parameter] public IReadOnlyList<string> CompanyNames { get; set; } = [];
+    [Parameter] public string SubmitLabel { get; set; } = "Save";
+    [Parameter] public bool Busy { get; set; }
+    [Parameter] public string? Error { get; set; }
+    [Parameter] public EventCallback OnValidSubmit { get; set; }
+    [Parameter] public EventCallback OnCancel { get; set; }
+}

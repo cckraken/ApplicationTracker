@@ -1,7 +1,85 @@
 ﻿@page "/"
+@inject ApplicationService Applications
 
-<PageTitle>Home</PageTitle>
+<PageTitle>Today · Application Tracker</PageTitle>
 
-<h1>Hello, world!</h1>
+<h1>Today</h1>
 
-Welcome to your new app.
+@if (active is null)
+{
+    <p>Loading…</p>
+}
+else if (active.Count == 0)
+{
+    <div class="empty-state mt-3">
+        <h2 class="h5">No active applications</h2>
+        <p>Add a job you have applied for, or one you are thinking about. Give it a follow-up date and it will show up here on the day it needs attention.</p>
+        <div class="d-flex flex-wrap justify-content-center gap-2">
+            <a class="btn btn-primary" href="applications/new">Add application</a>
+            <a class="btn btn-outline-primary" href="applications">View all applications</a>
+        </div>
+    </div>
+}
+else
+{
+    <section class="mb-4" aria-labelledby="follow-ups-heading">
+        <h2 id="follow-ups-heading" class="h4">Follow up</h2>
+
+        @if (followUps.Count == 0)
+        {
+            <p class="text-body-secondary">Nothing to follow up today.</p>
+        }
+        else
+        {
+            @* One line of markup: Razor drops whitespace between separate elements. *@
+            <p>@if (overdue > 0) {<strong class="followup-date-overdue">@overdue overdue</strong>}@if (overdue > 0 && dueToday > 0) {<text> and </text>}@if (dueToday > 0) {<strong>@dueToday due today</strong>}</p>
+
+            <ul class="follow-up-list">
+                @foreach (var item in followUps)
+                {
+                    <li @key="item.Id" class="follow-up-item @(item.FollowUpState == FollowUpState.Overdue ? "is-overdue" : "is-due-today")">
+                        <div>
+                            <a class="fw-semibold" href="applications/@item.Id/edit">@item.RoleTitle</a>
+                            <span class="text-body-secondary">at @item.CompanyName</span>
+                        </div>
+                        <div class="d-flex flex-wrap align-items-center gap-2">
+                            <StatusBadge Status="item.Status" />
+                            <FollowUpBadge State="item.FollowUpState" />
+                            @if (item.FollowUpOn is DateOnly date)
+                            {
+                                <span class="small text-nowrap">@date.ToString("d MMM yyyy")</span>
+                            }
+                        </div>
+                    </li>
+                }
+            </ul>
+        }
+    </section>
+
+    <section aria-labelledby="overview-heading">
+        <h2 id="overview-heading" class="h4">Overview</h2>
+        <p>@active.Count active @(active.Count == 1 ? "application" : "applications").</p>
+        <div class="d-flex flex-wrap gap-2">
+            <a class="btn btn-primary" href="applications/new">Add application</a>
+            <a class="btn btn-outline-primary" href="applications">View all applications</a>
+        </div>
+    </section>
+}
+
+@code {
+    private IReadOnlyList<ApplicationSummary>? active;
+    private IReadOnlyList<ApplicationSummary> followUps = [];
+    private int overdue;
+    private int dueToday;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Default filter: active applications, sorted by follow-up date, so overdue come first.
+        active = await Applications.ListAsync(new ApplicationFilter());
+        followUps = active
+            .Where(a => a.FollowUpState is FollowUpState.Overdue or FollowUpState.DueToday)
+            .ToList();
+        overdue = followUps.Count(a => a.FollowUpState == FollowUpState.Overdue);
+        dueToday = followUps.Count - overdue;
+    }
+}
