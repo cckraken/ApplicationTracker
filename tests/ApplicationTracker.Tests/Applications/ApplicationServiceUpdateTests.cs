@@ -1,4 +1,5 @@
 using ApplicationTracker.Core.Applications;
+using ApplicationTracker.Core.Contacts;
 using ApplicationTracker.Core.Domain;
 using ApplicationTracker.Tests.TestSupport;
 using Microsoft.EntityFrameworkCore;
@@ -135,5 +136,33 @@ public sealed class ApplicationServiceUpdateTests : IDisposable
         var sorted = await _service.ListAsync(new ApplicationFilter { SortBy = ApplicationSort.AppliedOn, Descending = descending });
 
         Assert.Equal("Wishlist Co", sorted[^1].CompanyName);
+    }
+
+    [Fact]
+    public async Task UpdateAsync_CapitalisationFixOnCompanySharedWithAContact_KeepsTheSharedName()
+    {
+        var id = await Create("contoso");
+        await new ContactService(_db).CreateAsync(new ContactInput { Name = "Sam Recruiter", Company = "contoso" });
+        var form = await _service.GetForEditAsync(id);
+
+        form!.Company = "Contoso";
+        await _service.UpdateAsync(id, form);
+
+        Assert.Equal(["contoso"], await _service.GetCompanyNamesAsync());
+        Assert.Equal("contoso", (await _service.GetDetailsAsync(id))!.CompanyName);
+    }
+
+    [Fact]
+    public async Task UpdateAsync_MovingToACompanyOnlyAContactUses_ReusesItAndRemovesTheOldOne()
+    {
+        var id = await Create("Gogle");
+        await new ContactService(_db).CreateAsync(new ContactInput { Name = "Sam Recruiter", Company = "Google" });
+        var form = await _service.GetForEditAsync(id);
+
+        form!.Company = "GOOGLE";
+        await _service.UpdateAsync(id, form);
+
+        Assert.Equal(["Google"], await _service.GetCompanyNamesAsync());
+        Assert.Equal("Google", (await _service.GetDetailsAsync(id))!.CompanyName);
     }
 }

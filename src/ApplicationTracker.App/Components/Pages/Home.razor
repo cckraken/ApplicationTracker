@@ -39,7 +39,7 @@ else
                 {
                     <li @key="item.Id" class="follow-up-item @(item.FollowUpState == FollowUpState.Overdue ? "is-overdue" : "is-due-today")">
                         <div>
-                            <a class="fw-semibold" href="applications/@item.Id/edit">@item.RoleTitle</a>
+                            <a class="fw-semibold" href="applications/@item.Id">@item.RoleTitle</a>
                             <span class="text-body-secondary">at @item.CompanyName</span>
                         </div>
                         <div class="d-flex flex-wrap align-items-center gap-2">

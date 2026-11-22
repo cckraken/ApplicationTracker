@@ -1,0 +1,930 @@
+@page "/applications/{Id:int}"
+@using System.ComponentModel.DataAnnotations
+@inject ApplicationService Applications
+@inject NoteService Notes
+@inject ContactService Contacts
+@inject TimeProvider Time
+@inject ILogger<ApplicationDetail> Logger
+@inject NavigationManager Navigation
+
+<PageTitle>@(details is null ? "Application" : $"{details.RoleTitle} at {details.CompanyName}") · Application Tracker</PageTitle>
+
+<p class="visually-hidden" role="status" aria-live="polite">@announcement</p>
+
+@if (details is not null)
+{
+    <nav aria-label="Breadcrumb">
+        <ol class="breadcrumb mb-2">
+            <li class="breadcrumb-item"><a href="applications">Applications</a></li>
+            <li class="breadcrumb-item active text-break" aria-current="page">@details.RoleTitle</li>
+        </ol>
+    </nav>
+}
+
+@* One h1 for every state, so it stays the same element: FocusOnNavigate can focus it
+   even if the first render was still loading. *@
+<div class="detail-header">
+    <h1 class="text-break mb-0">
+        @if (details is not null)
+        {
+            @details.RoleTitle <span class="detail-company">at @details.CompanyName</span>
+        }
+        else if (loading)
+        {
+            <text>Loading application…</text>
+        }
+        else if (loadFailed)
+        {
+            <text>Couldn't load this application</text>
+        }
+        else
+        {
+            <text>Application not found</text>
+        }
+    </h1>
+    @if (details is not null)
+    {
+        <a class="btn btn-outline-primary" href="applications/@details.Id/edit">Edit details</a>
+    }
+</div>
+
+@if (details is null)
+{
+    @if (!loading && loadFailed)
+    {
+        <div class="alert alert-danger mt-3" role="alert">Something went wrong reading the data. Please reload the page.</div>
+    }
+    else if (!loading)
+    {
+        <p class="mt-3">It may have been deleted. <a href="applications">Back to applications</a></p>
+    }
+}
+else
+{
+    @if (notice is not null)
+    {
+        <div class="alert alert-success alert-dismissible mt-3">
+            @notice
+            <button type="button" class="btn-close" aria-label="Dismiss message" @onclick="() => notice = null"></button>
+        </div>
+    }
+
+    @if (errorNotice is not null)
+    {
+        <div class="alert alert-danger alert-dismissible mt-3" role="alert">
+            @errorNotice
+            <button type="button" class="btn-close" aria-label="Dismiss error" @onclick="() => errorNotice = null"></button>
+        </div>
+    }
+
+    <div class="detail-grid">
+        <div class="detail-main">
+            @* ---------- Status ---------- *@
+            <section class="detail-section" aria-labelledby="status-heading">
+                <h2 id="status-heading" class="h5">Status</h2>
+                <div class="d-flex flex-wrap align-items-center gap-2">
+                    <StatusBadge Status="details.Status" />
+                    <FollowUpBadge State="details.FollowUpState" />
+                    <span class="small text-body-secondary">@DaysInStageText(details)</span>
+                </div>
+
+                <div class="status-controls">
+                    @if (details.Status.PreviousInPipeline() is ApplicationStatus prev)
+                    {
+                        <button type="button" class="btn btn-sm btn-outline-secondary" @ref="prevButton"
+                                @onclick="() => MoveStatusAsync(PipelineDirection.Back)">
+                            <span aria-hidden="true">← </span>Back to @prev
+                        </button>
+                    }
+                    @if (details.Status.NextInPipeline() is ApplicationStatus next)
+                    {
+                        <button type="button" class="btn btn-sm btn-outline-secondary" @ref="nextButton"
+                                @onclick="() => MoveStatusAsync(PipelineDirection.Forward)">
+                            Forward to @next<span aria-hidden="true"> →</span>
+                        </button>
+                    }
+                    <form class="d-flex flex-wrap align-items-center gap-2" @onsubmit="MoveToChosenAsync">
+                        <label for="move-to" class="form-label mb-0 small">Move to</label>
+                        <select id="move-to" class="form-select form-select-sm w-auto" @bind="moveTarget" @ref="moveSelect">
+                            <option value="">Choose…</option>
+                            <optgroup label="Pipeline">
+                                @foreach (var status in ApplicationStatusExtensions.Pipeline.Where(s => s != details.Status))
+                                {
+                                    <option value="@status">@status</option>
+                                }
+                            </optgroup>
+                            <optgroup label="Closed">
+                                @foreach (var status in Enum.GetValues<ApplicationStatus>().Where(s => s.IsClosed() && s != details.Status))
+                                {
+                                    <option value="@status">@status</option>
+                                }
+                            </optgroup>
+                        </select>
+                        <button type="submit" class="btn btn-sm btn-outline-primary" disabled="@string.IsNullOrEmpty(moveTarget)">Move</button>
+                    </form>
+                </div>
+            </section>
+
+            @* ---------- Notes ---------- *@
+            <section class="detail-section" aria-labelledby="notes-heading">
+                <h2 id="notes-heading" class="h5" tabindex="-1" @ref="notesHeading">
+                    Notes <span class="board-count">@details.Notes.Count<span class="visually-hidden"> @(details.Notes.Count == 1 ? "note" : "notes")</span></span>
+                </h2>
+
+                <form class="note-add" @onsubmit="AddNoteAsync">
+                    <label for="new-note" class="form-label">Add a note</label>
+                    <textarea id="new-note" class="form-control" rows="3" maxlength="@Note.MaxBodyLength"
+                              @bind="newNote" @bind:event="oninput" @ref="newNoteInput"
+                              aria-invalid="@(addNoteError is null ? null : "true")"
+                              aria-describedby="@(addNoteError is null ? null : "new-note-error")"
+                              placeholder="What happened, what's next, questions to ask…"></textarea>
+                    @if (addNoteError is not null)
+                    {
+                        <div id="new-note-error" class="validation-message">@addNoteError</div>
+                    }
+                    <button type="submit" class="btn btn-primary btn-sm mt-2" disabled="@(busy || string.IsNullOrWhiteSpace(newNote))">Add note</button>
+                </form>
+
+                @if (details.Notes.Count == 0)
+                {
+                    <p class="text-body-secondary mt-3 mb-0">No notes yet.</p>
+                }
+                else
+                {
+                    <ol class="note-list">
+                        @foreach (var note in details.Notes)
+                        {
+                            var added = LocalTime(note.CreatedAt);
+                            <li @key="note.Id" class="note-item">
+                                @if (editingNoteId == note.Id)
+                                {
+                                    <form @onsubmit="() => SaveNoteAsync(note)">
+                                        <label for="@($"note-edit-{note.Id}")" class="form-label">Edit note from @added</label>
+                                        <textarea id="@($"note-edit-{note.Id}")" class="form-control" rows="4" maxlength="@Note.MaxBodyLength"
+                                                  @bind="editNoteText" @bind:event="oninput" @ref="editNoteInput"
+                                                  @onkeydown="e => OnEditNoteKeyDown(e, note)"
+                                                  aria-invalid="@(editNoteError is null ? null : "true")"
+                                                  aria-describedby="@(editNoteError is null ? null : "edit-note-error")"></textarea>
+                                        @if (editNoteError is not null)
+                                        {
+                                            <div id="edit-note-error" class="validation-message">@editNoteError</div>
+                                        }
+                                        <div class="d-flex gap-2 mt-2">
+                                            <button type="submit" class="btn btn-primary btn-sm" disabled="@busy">Save</button>
+                                            <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="() => CancelEditNote(note)">Cancel</button>
+                                        </div>
+                                    </form>
+                                }
+                                else
+                                {
+                                    <div class="note-body">@note.Body</div>
+                                    <div class="note-meta">
+                                        <span>Added <time datetime="@Iso(note.CreatedAt)">@added</time></span>
+                                        @if (note.UpdatedAt is DateTime edited)
+                                        {
+                                            <span aria-hidden="true"> · </span>
+                                            <span>edited <time datetime="@Iso(edited)">@LocalTime(edited)</time></span>
+                                        }
+                                    </div>
+                                    @if (pendingDeleteNoteId == note.Id)
+                                    {
+                                        <div class="d-flex flex-wrap align-items-center gap-2 mt-2" role="group"
+                                             aria-labelledby="@($"note-delete-{note.Id}")" @onkeydown="e => OnConfirmKeyDown(e, note)">
+                                            <span id="@($"note-delete-{note.Id}")">Delete this note permanently?</span>
+                                            <button type="button" class="btn btn-danger btn-sm" @onclick="() => DeleteNoteAsync(note)">Delete</button>
+                                            <button type="button" class="btn btn-outline-secondary btn-sm" @ref="deleteCancelButton"
+                                                    @onclick="() => CancelDeleteNote(note)">Cancel</button>
+                                        </div>
+                                    }
+                                    else
+                                    {
+                                        <div class="item-actions">
+                                            <button type="button" class="btn btn-link btn-sm btn-quiet" @ref="noteEditButtons[note.Id]"
+                                                    aria-label="@($"Edit note from {added}")" @onclick="() => StartEditNote(note)">Edit</button>
+                                            <button type="button" class="btn btn-link btn-sm btn-quiet btn-quiet-danger" @ref="noteDeleteButtons[note.Id]"
+                                                    aria-label="@($"Delete note from {added}")" @onclick="() => RequestDeleteNote(note)">Delete</button>
+                                        </div>
+                                    }
+                                }
+                            </li>
+                        }
+                    </ol>
+                }
+            </section>
+        </div>
+
+        <aside class="detail-side">
+            @* ---------- Details ---------- *@
+            <section class="detail-section" aria-labelledby="facts-heading">
+                <h2 id="facts-heading" class="h5">Details</h2>
+                <dl class="detail-facts">
+                    <dt>Company</dt>
+                    <dd>@details.CompanyName</dd>
+                    @if (!string.IsNullOrEmpty(details.Location))
+                    {
+                        <dt>Location</dt>
+                        <dd>@details.Location</dd>
+                    }
+                    @if (!string.IsNullOrEmpty(details.SalaryRange))
+                    {
+                        <dt>Salary</dt>
+                        <dd>@details.SalaryRange</dd>
+                    }
+                    @if (!string.IsNullOrEmpty(details.Source))
+                    {
+                        <dt>Source</dt>
+                        <dd>@details.Source</dd>
+                    }
+                    @if (!string.IsNullOrEmpty(details.PostingUrl))
+                    {
+                        <dt>Posting</dt>
+                        <dd><a href="@details.PostingUrl" target="_blank" rel="noopener noreferrer">Open posting<span aria-hidden="true"> ↗</span><span class="visually-hidden"> (opens in a new tab)</span></a></dd>
+                    }
+                    <dt>Applied</dt>
+                    <dd>@(details.AppliedOn?.ToString("d MMM yyyy") ?? "Not yet")</dd>
+                    <dt>Follow up</dt>
+                    <dd class="@FollowUpClass(details.FollowUpState)">@(details.FollowUpOn?.ToString("d MMM yyyy") ?? "Not set")@FollowUpSuffix(details.FollowUpState)</dd>
+                    <dt>Added</dt>
+                    <dd><time datetime="@Iso(details.CreatedAt)">@LocalTime(details.CreatedAt)</time></dd>
+                </dl>
+            </section>
+
+            @* ---------- Contacts ---------- *@
+            <section class="detail-section" aria-labelledby="contacts-heading">
+                <h2 id="contacts-heading" class="h5" tabindex="-1" @ref="contactsHeading">
+                    Contacts <span class="board-count">@details.Contacts.Count<span class="visually-hidden"> @(details.Contacts.Count == 1 ? "contact" : "contacts")</span></span>
+                </h2>
+
+                @if (details.Contacts.Count == 0 && !addingContact)
+                {
+                    <p class="text-body-secondary">No contacts linked yet.</p>
+                }
+
+                <ul class="contact-cards">
+                    @foreach (var contact in details.Contacts)
+                    {
+                        <li @key="contact.Id" class="contact-card">
+                            @if (editingContactId == contact.Id && editContact is not null)
+                            {
+                                <h3 class="h6">Edit @contact.Name</h3>
+                                <ContactForm @ref="editContactForm" IdPrefix="@($"contact-edit-{contact.Id}")" Model="editContact"
+                                             CompanyNames="companyNames" SubmitLabel="Save contact" Busy="busy" Error="@contactError"
+                                             OnValidSubmit="() => SaveContactAsync(contact)" OnCancel="() => CancelEditContact(contact)" />
+                            }
+                            else
+                            {
+                                <ContactDetails Contact="contact" />
+                                <div class="item-actions">
+                                    <button type="button" class="btn btn-link btn-sm btn-quiet" @ref="contactEditButtons[contact.Id]"
+                                            aria-label="@($"Edit {contact.Name}")" @onclick="() => StartEditContactAsync(contact)">Edit</button>
+                                    <button type="button" class="btn btn-link btn-sm btn-quiet"
+                                            aria-label="@($"Unlink {contact.Name} from this application")" @onclick="() => UnlinkAsync(contact)">Unlink</button>
+                                </div>
+                            }
+                        </li>
+                    }
+                </ul>
+
+                @if (addingContact)
+                {
+                    <div class="contact-card">
+                        <h3 class="h6">New contact</h3>
+                        <ContactForm @ref="addContactForm" IdPrefix="contact-new" Model="newContact" CompanyNames="companyNames"
+                                     SubmitLabel="Add contact" Busy="busy" Error="@contactError"
+                                     OnValidSubmit="AddContactAsync" OnCancel="CancelAddContact" />
+                    </div>
+                }
+                else
+                {
+                    <button type="button" class="btn btn-outline-primary btn-sm" @ref="addContactButton" @onclick="StartAddContactAsync">Add contact</button>
+                }
+
+                @* Hidden while the new-contact form is open, so there aren't two competing ways to add. *@
+                @if (linkCandidates.Count > 0 && !addingContact)
+                {
+                    var sameCompany = linkCandidates.Where(c => IsSameCompany(c, details)).ToList();
+                    var others = linkCandidates.Where(c => !IsSameCompany(c, details)).ToList();
+                    <form class="link-contact" @onsubmit="LinkChosenAsync">
+                        <label for="link-contact" class="form-label small mb-1">Or link an existing contact</label>
+                        <div class="d-flex flex-wrap gap-2">
+                            <select id="link-contact" class="form-select form-select-sm w-auto mw-100" @bind="linkChoice">
+                                <option value="">Choose…</option>
+                                @if (sameCompany.Count > 0)
+                                {
+                                    <optgroup label="@($"At {details.CompanyName}")">
+                                        @foreach (var candidate in sameCompany)
+                                        {
+                                            <option value="@candidate.Id">@CandidateLabel(candidate)</option>
+                                        }
+                                    </optgroup>
+                                }
+                                @if (others.Count > 0)
+                                {
+                                    <optgroup label="Other contacts">
+                                        @foreach (var candidate in others)
+                                        {
+                                            <option value="@candidate.Id">@CandidateLabel(candidate)</option>
+                                        }
+                                    </optgroup>
+                                }
+                            </select>
+                            <button type="submit" class="btn btn-sm btn-outline-primary" disabled="@string.IsNullOrEmpty(linkChoice)">Link</button>
+                        </div>
+                    </form>
+                }
+
+                <p class="small text-body-secondary mt-3 mb-0">All contacts are on the <a href="contacts">Contacts page</a>.</p>
+            </section>
+        </aside>
+    </div>
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    /// <summary>Set after the edit or add form saved, to show a confirmation.</summary>
+    [SupplyParameterFromQuery(Name = "saved")]
+    public bool? Saved { get; set; }
+
+    private ApplicationDetails? details;
+    private bool loading = true;
+    private bool loadFailed;
+    private string? notice;
+    private string? errorNotice;
+    private string announcement = "";
+    private int loadVersion;
+
+    // True while an action (save + reload + reset) is running; see Exclusive.
+    private bool busy;
+
+    // Status
+    private string moveTarget = "";
+    private ElementReference prevButton;
+    private ElementReference nextButton;
+    private ElementReference moveSelect;
+
+    // Notes
+    private string newNote = "";
+    private string? addNoteError;
+    private int? editingNoteId;
+    private string editNoteText = "";
+    private string? editNoteError;
+    private int? pendingDeleteNoteId;
+    private ElementReference newNoteInput;
+    private ElementReference editNoteInput;
+    private ElementReference deleteCancelButton;
+    private ElementReference notesHeading;
+    private readonly Dictionary<int, ElementReference> noteEditButtons = new();
+    private readonly Dictionary<int, ElementReference> noteDeleteButtons = new();
+
+    // Contacts
+    private bool addingContact;
+    private ContactInput newContact = new();
+    private int? editingContactId;
+    private ContactInput? editContact;
+    private string? contactError;
+    private IReadOnlyList<ContactSummary> linkCandidates = [];
+    private IReadOnlyList<string> companyNames = [];
+    private string linkChoice = "";
+    private ContactForm? addContactForm;
+    private ContactForm? editContactForm;
+    private ElementReference addContactButton;
+    private ElementReference contactsHeading;
+    private readonly Dictionary<int, ElementReference> contactEditButtons = new();
+
+    private Func<Task>? focusAfterRender;
+    private int? shownId;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (Saved == true)
+        {
+            notice = "Saved.";
+        }
+
+        // Only "?saved" was removed from the address (see OnAfterRenderAsync): nothing to reload.
+        if (shownId == Id && details is not null)
+        {
+            return;
+        }
+
+        shownId = Id;
+        details = null; // never show (or act on) another application while this one loads
+        if (Saved != true)
+        {
+            notice = null;
+        }
+        loading = true;
+        ResetEditing();
+        await LoadAsync();
+        loading = false;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // Drop "?saved=true" so a reload or Back doesn't show "Saved." again.
+        if (Saved == true && !loading)
+        {
+            Navigation.NavigateTo(Navigation.GetUriWithQueryParameter("saved", (bool?)null), replace: true);
+        }
+
+        if (focusAfterRender is { } focus)
+        {
+            focusAfterRender = null;
+            try
+            {
+                await focus();
+            }
+            catch (JSException)
+            {
+                // The element went away before it could be focused; nothing useful to do.
+            }
+        }
+    }
+
+    private void ResetEditing()
+    {
+        editingNoteId = null;
+        pendingDeleteNoteId = null;
+        editingContactId = null;
+        editContact = null;
+        addingContact = false;
+        contactError = null;
+        addNoteError = null;
+        editNoteError = null;
+        moveTarget = "";
+        linkChoice = "";
+    }
+
+    private async Task LoadAsync()
+    {
+        var version = ++loadVersion;
+        try
+        {
+            var loaded = await Applications.GetDetailsAsync(Id);
+            var candidates = loaded is null ? [] : await Contacts.GetLinkCandidatesAsync(Id);
+            var companies = loaded is null ? [] : await Applications.GetCompanyNamesAsync();
+            if (version == loadVersion)
+            {
+                details = loaded;
+                linkCandidates = candidates;
+                companyNames = companies;
+                loadFailed = false;
+            }
+        }
+        catch (Exception ex)
+        {
+            // Keep what is showing; an unhandled exception would end the whole circuit.
+            Logger.LogError(ex, "Loading application {Id} failed", Id);
+            if (version == loadVersion)
+            {
+                loadFailed = details is null;
+                errorNotice ??= "Couldn't load the latest data. Please reload the page.";
+            }
+        }
+    }
+
+    /// <summary>
+    /// Runs a whole action handler (the write, the reload and the state reset) on its own.
+    /// Blazor Server can still dispatch a second click while the first is awaiting, so a click
+    /// that arrives while an action is running is ignored, instead of saving twice or acting
+    /// on state the first action already cleared.
+    /// </summary>
+    private async Task Exclusive(Func<Task> action)
+    {
+        if (busy)
+        {
+            return;
+        }
+
+        busy = true;
+        try
+        {
+            await action();
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    /// <summary>
+    /// Runs one write. A <see cref="ValidationException"/> goes to <paramref name="onInvalid"/>;
+    /// anything else is logged and shown, and the page reloads so it shows what is really stored.
+    /// Call it from inside <see cref="Exclusive"/>.
+    /// </summary>
+    private async Task<bool> WriteAsync(Func<Task> write, string what, Action<string>? onInvalid = null)
+    {
+        try
+        {
+            await write();
+
+            // An old "Saved." or error shouldn't sit above the result of a later action.
+            notice = null;
+            errorNotice = null;
+            return true;
+        }
+        catch (ValidationException ex) when (onInvalid is not null)
+        {
+            onInvalid(ex.Message);
+            return false;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "{What} failed for application {Id}", what, Id);
+            errorNotice = $"Couldn't {what.ToLowerInvariant()}. Please try again.";
+            await LoadAsync();
+            return false;
+        }
+    }
+
+    private void HandleNotFound()
+    {
+        // The application was deleted elsewhere: the reload shows "not found".
+        Announce("This application no longer exists.");
+    }
+
+    // ---------- Status ----------
+
+    private Task MoveStatusAsync(PipelineDirection direction) =>
+        ApplyMoveAsync(() => Applications.MoveInPipelineAsync(Id, direction), direction);
+
+    private async Task MoveToChosenAsync()
+    {
+        if (Enum.TryParse<ApplicationStatus>(moveTarget, out var status))
+        {
+            await ApplyMoveAsync(() => Applications.MoveToAsync(Id, status), direction: null);
+        }
+    }
+
+    /// <param name="direction">The arrow used, so focus can stay on it; null for the "Move to" form.</param>
+    private Task ApplyMoveAsync(Func<Task<MoveResult>> move, PipelineDirection? direction) =>
+        Exclusive(() => ApplyMoveCoreAsync(move, direction));
+
+    private async Task ApplyMoveCoreAsync(Func<Task<MoveResult>> move, PipelineDirection? direction)
+    {
+        MoveResult? result = null;
+        if (!await WriteAsync(async () => result = await move(), "Change the status") || result is null)
+        {
+            return;
+        }
+
+        moveTarget = "";
+        await LoadAsync();
+        if (result.Outcome == MoveOutcome.NotFound)
+        {
+            HandleNotFound();
+            return;
+        }
+
+        Announce(result.Outcome == MoveOutcome.Moved ? $"Moved to {result.Status}." : $"Status is {result.Status}.");
+
+        // Stay on the arrow if it is still there, so pressing it again keeps moving; otherwise the select.
+        focusAfterRender = () =>
+            direction == PipelineDirection.Back && details?.Status.PreviousInPipeline() is not null ? prevButton.FocusAsync().AsTask()
+            : direction == PipelineDirection.Forward && details?.Status.NextInPipeline() is not null ? nextButton.FocusAsync().AsTask()
+            : details is not null ? moveSelect.FocusAsync().AsTask()
+            : Task.CompletedTask;
+    }
+
+    // ---------- Notes ----------
+
+    private Task AddNoteAsync() => Exclusive(AddNoteCoreAsync);
+
+    private async Task AddNoteCoreAsync()
+    {
+        // A second click that arrives after the first finished finds the box already cleared.
+        if (string.IsNullOrWhiteSpace(newNote))
+        {
+            return;
+        }
+
+        addNoteError = null;
+        NoteView? added = null;
+        if (!await WriteAsync(async () => added = await Notes.AddAsync(Id, newNote), "Add the note", e => { addNoteError = e; focusAfterRender = () => newNoteInput.FocusAsync().AsTask(); }))
+        {
+            return;
+        }
+
+        await LoadAsync();
+        if (added is null)
+        {
+            HandleNotFound();
+            return;
+        }
+
+        newNote = "";
+        Announce("Note added.");
+        focusAfterRender = () => newNoteInput.FocusAsync().AsTask(); // ready for the next one
+    }
+
+    private void StartEditNote(NoteView note)
+    {
+        pendingDeleteNoteId = null;
+        editingNoteId = note.Id;
+        editNoteText = note.Body;
+        editNoteError = null;
+        focusAfterRender = () => editNoteInput.FocusAsync().AsTask();
+    }
+
+    private void CancelEditNote(NoteView note)
+    {
+        editingNoteId = null;
+        editNoteError = null;
+        focusAfterRender = () => FocusIfPresent(noteEditButtons, note.Id, notesHeading);
+    }
+
+    private void OnEditNoteKeyDown(KeyboardEventArgs e, NoteView note)
+    {
+        if (e.Key == "Escape")
+        {
+            CancelEditNote(note);
+        }
+    }
+
+    private Task SaveNoteAsync(NoteView note) => Exclusive(() => SaveNoteCoreAsync(note));
+
+    private async Task SaveNoteCoreAsync(NoteView note)
+    {
+        if (editingNoteId != note.Id)
+        {
+            return; // a late second click: the editor already closed
+        }
+
+        editNoteError = null;
+        NoteView? saved = null;
+        if (!await WriteAsync(async () => saved = await Notes.UpdateAsync(note.Id, editNoteText), "Save the note", e => { editNoteError = e; focusAfterRender = () => editNoteInput.FocusAsync().AsTask(); }))
+        {
+            return;
+        }
+
+        editingNoteId = null;
+        await LoadAsync();
+        if (saved is null)
+        {
+            errorNotice = "That note no longer exists. It may have been deleted elsewhere.";
+            focusAfterRender = () => notesHeading.FocusAsync().AsTask();
+            return;
+        }
+
+        Announce("Note saved.");
+        focusAfterRender = () => FocusIfPresent(noteEditButtons, note.Id, notesHeading);
+    }
+
+    private void RequestDeleteNote(NoteView note)
+    {
+        editingNoteId = null;
+        pendingDeleteNoteId = note.Id;
+        focusAfterRender = () => deleteCancelButton.FocusAsync().AsTask();
+    }
+
+    private void CancelDeleteNote(NoteView note)
+    {
+        pendingDeleteNoteId = null;
+        focusAfterRender = () => FocusIfPresent(noteDeleteButtons, note.Id, notesHeading);
+    }
+
+    private void OnConfirmKeyDown(KeyboardEventArgs e, NoteView note)
+    {
+        if (e.Key == "Escape")
+        {
+            CancelDeleteNote(note);
+        }
+    }
+
+    private Task DeleteNoteAsync(NoteView note) => Exclusive(() => DeleteNoteCoreAsync(note));
+
+    private async Task DeleteNoteCoreAsync(NoteView note)
+    {
+        pendingDeleteNoteId = null;
+        if (!await WriteAsync(() => Notes.DeleteAsync(note.Id), "Delete the note"))
+        {
+            return;
+        }
+
+        noteEditButtons.Remove(note.Id);
+        noteDeleteButtons.Remove(note.Id);
+        await LoadAsync();
+        Announce("Note deleted.");
+        focusAfterRender = () => notesHeading.FocusAsync().AsTask();
+    }
+
+    // ---------- Contacts ----------
+
+    private Task StartAddContactAsync()
+    {
+        editingContactId = null;
+        editContact = null;
+        contactError = null;
+        newContact = new ContactInput { Company = details?.CompanyName };
+        addingContact = true;
+        focusAfterRender = () => addContactForm?.FocusAsync() ?? Task.CompletedTask;
+        return Task.CompletedTask;
+    }
+
+    private void CancelAddContact()
+    {
+        addingContact = false;
+        contactError = null;
+        focusAfterRender = () => addContactButton.FocusAsync().AsTask();
+    }
+
+    private Task AddContactAsync() => Exclusive(AddContactCoreAsync);
+
+    private async Task AddContactCoreAsync()
+    {
+        if (!addingContact)
+        {
+            return; // a late second click: the form already closed
+        }
+
+        contactError = null;
+        int? createdId = null;
+        if (!await WriteAsync(async () => createdId = await Contacts.CreateForApplicationAsync(Id, newContact),
+                "Add the contact", e => contactError = e))
+        {
+            return;
+        }
+
+        await LoadAsync();
+        if (createdId is null)
+        {
+            HandleNotFound();
+            return;
+        }
+
+        addingContact = false;
+        Announce($"{newContact.Name.Trim()} added.");
+        focusAfterRender = () => FocusIfPresent(contactEditButtons, createdId.Value, contactsHeading);
+    }
+
+    private Task StartEditContactAsync(ContactSummary contact) => Exclusive(() => StartEditContactCoreAsync(contact));
+
+    private async Task StartEditContactCoreAsync(ContactSummary contact)
+    {
+        addingContact = false;
+        contactError = null;
+        ContactInput? input = null;
+        if (!await WriteAsync(async () => input = await Contacts.GetForEditAsync(contact.Id), "Open the contact"))
+        {
+            return;
+        }
+
+        if (input is null)
+        {
+            errorNotice = $"{contact.Name} no longer exists. They may have been deleted elsewhere.";
+            await LoadAsync();
+            focusAfterRender = () => contactsHeading.FocusAsync().AsTask();
+            return;
+        }
+
+        editContact = input;
+        editingContactId = contact.Id;
+        focusAfterRender = () => editContactForm?.FocusAsync() ?? Task.CompletedTask;
+    }
+
+    private void CancelEditContact(ContactSummary contact)
+    {
+        editingContactId = null;
+        editContact = null;
+        contactError = null;
+        focusAfterRender = () => FocusIfPresent(contactEditButtons, contact.Id, contactsHeading);
+    }
+
+    private Task SaveContactAsync(ContactSummary contact) => Exclusive(() => SaveContactCoreAsync(contact));
+
+    private async Task SaveContactCoreAsync(ContactSummary contact)
+    {
+        if (editingContactId != contact.Id || editContact is null)
+        {
+            return; // a late second click: the form already closed
+        }
+
+        contactError = null;
+        var found = false;
+        if (!await WriteAsync(async () => found = await Contacts.UpdateAsync(contact.Id, editContact!),
+                "Save the contact", e => contactError = e))
+        {
+            return;
+        }
+
+        editingContactId = null;
+        editContact = null;
+        await LoadAsync();
+        if (!found)
+        {
+            errorNotice = $"{contact.Name} no longer exists. They may have been deleted elsewhere.";
+            focusAfterRender = () => contactsHeading.FocusAsync().AsTask();
+            return;
+        }
+
+        Announce("Contact saved.");
+        focusAfterRender = () => FocusIfPresent(contactEditButtons, contact.Id, contactsHeading);
+    }
+
+    private Task UnlinkAsync(ContactSummary contact) => Exclusive(() => UnlinkCoreAsync(contact));
+
+    private async Task UnlinkCoreAsync(ContactSummary contact)
+    {
+        if (!await WriteAsync(() => Contacts.UnlinkAsync(Id, contact.Id), "Unlink the contact"))
+        {
+            return;
+        }
+
+        contactEditButtons.Remove(contact.Id);
+        await LoadAsync();
+        Announce($"{contact.Name} unlinked. They are still on the Contacts page.");
+        focusAfterRender = () => contactsHeading.FocusAsync().AsTask();
+    }
+
+    private Task LinkChosenAsync() => Exclusive(LinkChosenCoreAsync);
+
+    private async Task LinkChosenCoreAsync()
+    {
+        if (!int.TryParse(linkChoice, out var contactId))
+        {
+            return;
+        }
+
+        var name = linkCandidates.FirstOrDefault(c => c.Id == contactId)?.Name ?? "Contact";
+        var linked = false;
+        if (!await WriteAsync(async () => linked = await Contacts.LinkAsync(Id, contactId), "Link the contact"))
+        {
+            return;
+        }
+
+        linkChoice = "";
+        await LoadAsync();
+        if (!linked)
+        {
+            if (details is null)
+            {
+                HandleNotFound();
+            }
+            else
+            {
+                errorNotice = $"{name} no longer exists. They may have been deleted elsewhere.";
+                focusAfterRender = () => contactsHeading.FocusAsync().AsTask();
+            }
+            return;
+        }
+
+        Announce($"{name} linked.");
+        focusAfterRender = () => FocusIfPresent(contactEditButtons, contactId, contactsHeading);
+    }
+
+    // ---------- Helpers ----------
+
+    /// <summary>
+    /// Sets the live region text. The same text twice in a row would be silent (nothing changed),
+    /// so a trailing no-break space is toggled to make it change.
+    /// </summary>
+    private void Announce(string text) =>
+        announcement = announcement == text ? text + " " : text;
+
+    /// <summary>Says "overdue" / "due today" in words too, so it isn't shown by colour alone.</summary>
+    private static RenderFragment? FollowUpSuffix(FollowUpState state) => state switch
+    {
+        FollowUpState.Overdue => @<span class="visually-hidden"> (overdue)</span>,
+        FollowUpState.DueToday => @<span class="visually-hidden"> (due today)</span>,
+        _ => null,
+    };
+
+    /// <summary>Display grouping only: same company name as the application, ignoring case.</summary>
+    private static bool IsSameCompany(ContactSummary contact, ApplicationDetails application) =>
+        string.Equals(contact.CompanyName, application.CompanyName, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Focuses the element for <paramref name="id"/> if it is still rendered, otherwise the fallback.</summary>
+    private Task FocusIfPresent(Dictionary<int, ElementReference> refs, int id, ElementReference fallback)
+    {
+        // A dictionary entry outlives its element, so ask the data whether the item is still shown.
+        var shown = details is not null && (ReferenceEquals(refs, contactEditButtons)
+            ? details.Contacts.Any(c => c.Id == id)
+            : details.Notes.Any(n => n.Id == id));
+        return (shown && refs.TryGetValue(id, out var element) ? element : fallback).FocusAsync().AsTask();
+    }
+
+    private string LocalTime(DateTime utc) =>
+        TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(utc, DateTimeKind.Utc), Time.LocalTimeZone)
+            .ToString("d MMM yyyy, HH:mm");
+
+    // HTML allows at most 3 fractional digits in <time datetime>, so whole seconds.
+    private static string Iso(DateTime utc) => DateTime.SpecifyKind(utc, DateTimeKind.Utc).ToString("yyyy-MM-ddTHH:mm:ssZ");
+
+    private static string DaysInStageText(ApplicationDetails d) => d.DaysInStage switch
+    {
+        0 => $"In {d.Status} since today",
+        1 => $"1 day in {d.Status}",
+        var n => $"{n} days in {d.Status}",
+    };
+
+    private static string? FollowUpClass(FollowUpState state) => state switch
+    {
+        FollowUpState.Overdue => "followup-date-overdue",
+        FollowUpState.DueToday => "followup-date-due-today",
+        _ => null,
+    };
+
+    private static string CandidateLabel(ContactSummary c) =>
+        string.Join(" · ", new[] { c.Name, c.Role, c.CompanyName }.Where(s => !string.IsNullOrEmpty(s)));
+}

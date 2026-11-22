@@ -122,7 +122,7 @@ else
                     <tr @key="row.Id" class="@RowClass(row)">
                         <th scope="row" class="fw-normal cell-wrap">@row.CompanyName</th>
                         <td class="cell-wrap">
-                            <a href="applications/@row.Id/edit">@row.RoleTitle</a>
+                            <a href="applications/@row.Id">@row.RoleTitle</a>
                             @if (!string.IsNullOrEmpty(row.Location))
                             {
                                 <div class="small text-body-secondary">@row.Location</div>
@@ -187,10 +187,6 @@ else
     // after this pause, or straight away when focus leaves the dropdown.
     private static readonly TimeSpan StatusSaveDelay = TimeSpan.FromSeconds(1.5);
 
-    /// <summary>Id of an application that was just added or edited; shows a confirmation.</summary>
-    [SupplyParameterFromQuery(Name = "saved")]
-    public int? SavedId { get; set; }
-
     private IReadOnlyList<ApplicationSummary>? rows;
     private string search = "";
     private string statusFilter = "";
@@ -223,18 +219,7 @@ else
     private int OverdueCount => rows?.Count(r => r.FollowUpState == FollowUpState.Overdue) ?? 0;
     private int DueTodayCount => rows?.Count(r => r.FollowUpState == FollowUpState.DueToday) ?? 0;
 
-    protected override async Task OnInitializedAsync()
-    {
-        await LoadAsync();
-
-        if (SavedId is int savedId)
-        {
-            var saved = rows?.FirstOrDefault(r => r.Id == savedId);
-            notice = saved is not null
-                ? $"Saved {saved.RoleTitle} at {saved.CompanyName}."
-                : "Application saved. It is not shown because rejected and withdrawn applications are hidden.";
-        }
-    }
+    protected override Task OnInitializedAsync() => LoadAsync();
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {

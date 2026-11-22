@@ -83,7 +83,11 @@ public class TrackerDbContext : DbContext
                 .HasForeignKey(c => c.CompanyId).OnDelete(DeleteBehavior.SetNull);
         });
 
-        modelBuilder.Entity<Note>(e => e.HasIndex(n => n.CreatedAt));
+        modelBuilder.Entity<Note>(e =>
+        {
+            e.Property(n => n.Body).HasMaxLength(Note.MaxBodyLength);
+            e.HasIndex(n => n.CreatedAt);
+        });
 
         modelBuilder.Entity<Reminder>(e =>
         {

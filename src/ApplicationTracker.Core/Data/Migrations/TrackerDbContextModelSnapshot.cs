@@ -136,6 +136,7 @@ namespace ApplicationTracker.Core.Data.Migrations
 
                     b.Property<string>("Body")
                         .IsRequired()
+                        .HasMaxLength(4000)
                         .HasColumnType("TEXT");
 
                     b.Property<DateTime>("CreatedAt")
@@ -143,6 +144,9 @@ namespace ApplicationTracker.Core.Data.Migrations
 
                     b.Property<int>("JobApplicationId")
                         .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("TEXT");
 
                     b.HasKey("Id");
 

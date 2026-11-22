@@ -1,0 +1,120 @@
+@* Inline add/edit form for a contact. The page owns saving; this only collects and validates input.
+   IdPrefix keeps ids unique when several forms could be on one page. *@
+<EditForm Model="Model" OnValidSubmit="OnValidSubmit" OnInvalidSubmit="OnInvalid" class="contact-form" novalidate>
+    <DataAnnotationsValidator />
+
+    @if (!string.IsNullOrEmpty(Error))
+    {
+        <div class="alert alert-danger py-2" role="alert">@Error</div>
+    }
+
+    <p class="form-text mt-0 mb-2">
+        Only the name is required<span class="required-mark" aria-hidden="true"> *</span>.
+    </p>
+
+    @* A grid sized by the container, not the viewport: one field per row in a narrow
+       column or card, several side by side when there is room. *@
+    <div class="contact-form-fields">
+        <div>
+            <label for="@Id("name")" class="form-label">Name <span class="required-mark" aria-hidden="true">*</span></label>
+            <InputText id="@Id("name")" class="form-control" @bind-Value="Model.Name" @ref="nameInput"
+                       aria-required="true" aria-describedby="@Id("name-error")" autocomplete="off" />
+            <div id="@Id("name-error")"><ValidationMessage For="() => Model.Name" /></div>
+        </div>
+        <div>
+            <label for="@Id("role")" class="form-label">Role</label>
+            <InputText id="@Id("role")" class="form-control" @bind-Value="Model.Role" placeholder="e.g. Recruiter" />
+        </div>
+        <div>
+            <label for="@Id("company")" class="form-label">Company</label>
+            <InputText id="@Id("company")" class="form-control" @bind-Value="Model.Company"
+                       list="@Id("company-names")" autocomplete="off" />
+            <datalist id="@Id("company-names")">
+                @foreach (var name in CompanyNames)
+                {
+                    <option value="@name"></option>
+                }
+            </datalist>
+        </div>
+        <div>
+            <label for="@Id("email")" class="form-label">Email</label>
+            <InputText id="@Id("email")" type="email" class="form-control" @bind-Value="Model.Email" @ref="emailInput"
+                       autocomplete="off" aria-describedby="@Id("email-error")" />
+            <div id="@Id("email-error")"><ValidationMessage For="() => Model.Email" /></div>
+        </div>
+        <div>
+            <label for="@Id("phone")" class="form-label">Phone</label>
+            <InputText id="@Id("phone")" type="tel" class="form-control" @bind-Value="Model.Phone" autocomplete="off" />
+        </div>
+        <div>
+            <label for="@Id("linkedin")" class="form-label">LinkedIn profile</label>
+            <InputText id="@Id("linkedin")" type="url" class="form-control" @bind-Value="Model.LinkedInUrl" @ref="linkedInInput"
+                       placeholder="https://" aria-describedby="@Id("linkedin-error")" />
+            <div id="@Id("linkedin-error")"><ValidationMessage For="() => Model.LinkedInUrl" /></div>
+        </div>
+    </div>
+
+    <div class="d-flex flex-wrap gap-2 mt-3">
+        <button type="submit" class="btn btn-primary btn-sm" disabled="@Busy">@SubmitLabel</button>
+        <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="OnCancel">Cancel</button>
+    </div>
+</EditForm>
+
+@code {
+    [Parameter, EditorRequired] public ContactInput Model { get; set; } = default!;
+    [Parameter, EditorRequired] public string IdPrefix { get; set; } = "";
+    [Parameter] public IReadOnlyList<string> CompanyNames { get; set; } = [];
+    [Parameter] public string SubmitLabel { get; set; } = "Save";
+    [Parameter] public bool Busy { get; set; }
+    [Parameter] public string? Error { get; set; }
+    [Parameter] public EventCallback OnValidSubmit { get; set; }
+    [Parameter] public EventCallback OnCancel { get; set; }
+
+    private InputText? nameInput;
+    private InputText? emailInput;
+    private InputText? linkedInInput;
+    private EditContext? invalidContext;
+
+    private string Id(string field) => $"{IdPrefix}-{field}";
+
+    /// <summary>Puts focus in the Name field, e.g. right after the form opens.</summary>
+    public async Task FocusAsync()
+    {
+        if (nameInput?.Element is { } element)
+        {
+            await element.FocusAsync();
+        }
+    }
+
+    // Focus the first invalid field after render, once its message is in the page, so a screen
+    // reader reads the label, "invalid" and the message (via aria-describedby).
+    private void OnInvalid(EditContext context) => invalidContext = context;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (invalidContext is not { } context)
+        {
+            return;
+        }
+        invalidContext = null;
+
+        var fields = new (InputText? Input, string Name)[]
+        {
+            (nameInput, nameof(ContactInput.Name)),
+            (emailInput, nameof(ContactInput.Email)),
+            (linkedInInput, nameof(ContactInput.LinkedInUrl)),
+        };
+        var first = fields.FirstOrDefault(f => context.GetValidationMessages(new FieldIdentifier(Model, f.Name)).Any());
+        if (first.Input?.Element is { } element)
+        {
+            try
+            {
+                await element.FocusAsync();
+            }
+            catch (JSException)
+            {
+                // The form closed before focus could move; nothing useful to do.
+            }
+        }
+    }
+}
