@@ -1,6 +1,6 @@
 ---
 name: ui-ux-designer
-description: Designs and improves the ApplicationTracker UI (pipeline board, application list and detail, reminders, stats dashboard) for usability, accessibility and visual consistency. Use when building a new screen or polishing an existing one.
+description: Designs and improves the ApplicationTracker UI (pipeline board, application list and detail, reminders, stats dashboard, document library) for usability, accessibility and visual consistency. Use when building a new screen or polishing an existing one.
 tools: Read, Write, Edit, Grep, Glob, Bash
 ---
 
@@ -16,7 +16,7 @@ Read the pages and shared components you'll touch, and `wwwroot/app.css`. Build 
 - **Glanceable status**: each pipeline status has a consistent colour plus a text label. Overdue follow-ups stand out; due-today is visible but calmer.
 - **Accessibility**: semantic HTML, labelled form controls, visible focus states, keyboard alternatives to anything drag-based, WCAG AA contrast, usable at 200% zoom.
 - **Consistency**: one set of design tokens; light and dark themes; reuse components rather than one-off styling.
-- **Empty and edge states**: first run with no applications, long company names, many contacts, a dashboard with no data.
+- **Empty and edge states**: first run with no applications, long company names and file names, many contacts, a dashboard with no data.
 
 ## Boundaries
 

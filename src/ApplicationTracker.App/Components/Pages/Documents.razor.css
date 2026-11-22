@@ -1,0 +1,77 @@
+.document-upload {
+    padding: 1rem;
+    border: 1px solid var(--bs-border-color);
+    border-radius: var(--bs-border-radius-lg);
+}
+
+/* As many columns as the container has room for, like the contact form; one per row when narrow. */
+.document-upload-fields,
+.document-edit-fields {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr));
+    gap: 0.5rem 0.75rem;
+}
+
+.document-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.document-item {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem 1rem;
+    padding: 0.75rem 0;
+    border-bottom: 1px solid var(--bs-border-color);
+}
+
+    .document-item ::deep form,
+    .document-edit-heading {
+        flex: 1 1 100%;
+        min-width: 0;
+    }
+
+.document-edit-heading {
+    margin: 0;
+    overflow-wrap: anywhere;
+}
+
+.document-main {
+    flex: 1 1 18rem;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.document-title {
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+
+.document-meta {
+    font-size: 0.875rem;
+    color: var(--bs-secondary-color);
+    overflow-wrap: anywhere;
+}
+
+/* The shared .item-actions sits under content; here it sits beside it. */
+.document-item .item-actions {
+    margin-top: 0;
+}
+
+.document-confirm {
+    flex: 1 1 100%;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem 1rem;
+    overflow-wrap: anywhere;
+}
+
+.document-confirm-buttons {
+    display: inline-flex;
+    gap: 0.5rem;
+}

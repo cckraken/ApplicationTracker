@@ -307,7 +307,7 @@ else
                 {
                     var sameCompany = linkCandidates.Where(c => IsSameCompany(c, details)).ToList();
                     var others = linkCandidates.Where(c => !IsSameCompany(c, details)).ToList();
-                    <form class="link-contact" @onsubmit="LinkChosenAsync">
+                    <form class="link-existing" @onsubmit="LinkChosenAsync">
                         <label for="link-contact" class="form-label small mb-1">Or link an existing contact</label>
                         <div class="d-flex flex-wrap gap-2">
                             <select id="link-contact" class="form-select form-select-sm w-auto mw-100" @bind="linkChoice">
@@ -338,6 +338,9 @@ else
 
                 <p class="small text-body-secondary mt-3 mb-0">All contacts are on the <a href="contacts">Contacts page</a>.</p>
             </section>
+
+            @* ---------- Documents ---------- *@
+            <ApplicationDocuments ApplicationId="Id" />
         </aside>
     </div>
 }

@@ -2,6 +2,7 @@ using ApplicationTracker.App.Components;
 using ApplicationTracker.Core.Applications;
 using ApplicationTracker.Core.Contacts;
 using ApplicationTracker.Core.Data;
+using ApplicationTracker.Core.Documents;
 using ApplicationTracker.Core.Notes;
 using ApplicationTracker.Core.Reminders;
 using ApplicationTracker.Core.Stats;
@@ -35,6 +36,12 @@ builder.Services.AddScoped<NoteService>();
 builder.Services.AddScoped<ContactService>();
 builder.Services.AddScoped<ReminderService>();
 builder.Services.AddScoped<StatsService>();
+// Uploaded CVs and cover letters sit next to the database, in the same never-committed folder.
+// Each database gets its own folder (tracker.db -> tracker-documents, tracker.dev.db -> tracker.dev-documents),
+// so development files never mix with real ones and each database's rows match its own files.
+var documentsDirectory = Path.Combine(dataDirectory, Path.GetFileNameWithoutExtension(databasePath) + "-documents");
+builder.Services.AddSingleton<IDocumentStore>(new FileSystemDocumentStore(documentsDirectory));
+builder.Services.AddScoped<DocumentService>();
 
 var app = builder.Build();
 
@@ -63,6 +70,14 @@ app.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages:
 app.UseAntiforgery();
 
 app.MapStaticAssets();
+
+// Downloads a stored CV or cover letter under its original name. Like the rest of the app this
+// is only reachable on localhost; hosting it would need authentication in front of it.
+app.MapGet("/documents/{id:int}/file", async (int id, DocumentService documents, CancellationToken ct) =>
+    await documents.OpenFileAsync(id, ct) is { } file
+        ? Results.File(file.Content, file.ContentType, file.FileName)
+        : Results.NotFound());
+
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 

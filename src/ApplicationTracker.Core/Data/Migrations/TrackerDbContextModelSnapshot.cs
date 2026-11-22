@@ -74,6 +74,51 @@ namespace ApplicationTracker.Core.Data.Migrations
                     b.ToTable("Contacts");
                 });
 
+            modelBuilder.Entity("ApplicationTracker.Core.Domain.Document", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ContentType")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("OriginalFileName")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("SizeBytes")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("StoredFileName")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("StoredFileName")
+                        .IsUnique();
+
+                    b.ToTable("Documents");
+                });
+
             modelBuilder.Entity("ApplicationTracker.Core.Domain.JobApplication", b =>
                 {
                     b.Property<int>("Id")
@@ -236,6 +281,21 @@ namespace ApplicationTracker.Core.Data.Migrations
                     b.ToTable("ApplicationContacts", (string)null);
                 });
 
+            modelBuilder.Entity("DocumentJobApplication", b =>
+                {
+                    b.Property<int>("ApplicationsId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("DocumentsId")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("ApplicationsId", "DocumentsId");
+
+                    b.HasIndex("DocumentsId");
+
+                    b.ToTable("ApplicationDocuments", (string)null);
+                });
+
             modelBuilder.Entity("ApplicationTracker.Core.Domain.Contact", b =>
                 {
                     b.HasOne("ApplicationTracker.Core.Domain.Company", "Company")
@@ -300,6 +360,21 @@ namespace ApplicationTracker.Core.Data.Migrations
                     b.HasOne("ApplicationTracker.Core.Domain.Contact", null)
                         .WithMany()
                         .HasForeignKey("ContactsId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("DocumentJobApplication", b =>
+                {
+                    b.HasOne("ApplicationTracker.Core.Domain.JobApplication", null)
+                        .WithMany()
+                        .HasForeignKey("ApplicationsId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("ApplicationTracker.Core.Domain.Document", null)
+                        .WithMany()
+                        .HasForeignKey("DocumentsId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });
