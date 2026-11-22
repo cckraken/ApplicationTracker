@@ -36,6 +36,7 @@ public class JobApplication
     /// Moves the application to <paramref name="newStatus"/> and records the change in
     /// <see cref="StatusHistory"/>. Moving to the current status is a no-op.
     /// Any transition is allowed: real hiring processes skip and repeat stages.
+    /// Moving to Applied or a later open stage fills in a missing <see cref="AppliedOn"/>.
     /// </summary>
     /// <param name="utcNow">When the change happened, in UTC (stored in the history).</param>
     /// <param name="localToday">
@@ -63,7 +64,8 @@ public class JobApplication
             ChangedAt = utcNow,
         });
 
-        if (newStatus == ApplicationStatus.Applied && AppliedOn is null)
+        // Skipping straight to a later stage still means it was applied to.
+        if (newStatus.IsAppliedOrLater() && AppliedOn is null)
         {
             AppliedOn = localToday;
         }

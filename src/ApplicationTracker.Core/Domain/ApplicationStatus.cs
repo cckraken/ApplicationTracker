@@ -42,6 +42,13 @@ public static class ApplicationStatusExtensions
 
     private static int IndexOf(ApplicationStatus status) => Array.IndexOf(PipelineOrder, status);
 
+    /// <summary>
+    /// True for Applied and the open stages after it (Screening, Interview, Offer): reaching one means
+    /// the application has been sent. Closed statuses are false, since closing from Wishlist isn't applying.
+    /// </summary>
+    public static bool IsAppliedOrLater(this ApplicationStatus status) =>
+        IndexOf(status) >= IndexOf(ApplicationStatus.Applied);
+
     /// <summary>True for statuses that end the pipeline (no further follow-up expected).</summary>
     public static bool IsClosed(this ApplicationStatus status) =>
         status is ApplicationStatus.Rejected or ApplicationStatus.Withdrawn;

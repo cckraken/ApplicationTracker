@@ -278,6 +278,19 @@ public sealed class StatsServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Applications_that_skip_applied_are_counted_this_week_and_in_the_response_rate()
+    {
+        await Create(ApplicationStatus.Screening);
+        var moved = await Create(ApplicationStatus.Wishlist);
+        await Move(moved, ApplicationStatus.Interview);
+
+        var dashboard = await Dashboard();
+
+        Assert.Equal(2, WeekCountFor(dashboard, CurrentWeek));
+        Assert.Equal(new ResponseRate(2, 2, 1.0), dashboard.Response);
+    }
+
+    [Fact]
     public async Task Per_week_counts_by_applied_on_not_creation_date()
     {
         await Create(ApplicationStatus.Applied, Today.AddDays(-21));

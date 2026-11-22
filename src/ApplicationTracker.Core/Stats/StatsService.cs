@@ -13,8 +13,6 @@ public class StatsService(IDbContextFactory<TrackerDbContext> dbFactory, TimePro
     private static readonly ApplicationStatus[] ResponseStatuses =
         [ApplicationStatus.Screening, ApplicationStatus.Interview, ApplicationStatus.Offer];
 
-    private static readonly ApplicationStatus[] AppliedStatuses = [ApplicationStatus.Applied, .. ResponseStatuses];
-
     public async Task<StatsDashboard> GetDashboardAsync(CancellationToken ct = default)
     {
         await using var db = await dbFactory.CreateDbContextAsync(ct);
@@ -55,7 +53,7 @@ public class StatsService(IDbContextFactory<TrackerDbContext> dbFactory, TimePro
         foreach (var app in applications)
         {
             var history = historyByApp[app.Id];
-            if (app.AppliedOn is null && !history.Any(c => AppliedStatuses.Contains(c.To)))
+            if (app.AppliedOn is null && !history.Any(c => c.To.IsAppliedOrLater()))
             {
                 continue;
             }

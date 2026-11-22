@@ -81,6 +81,66 @@ public class JobApplicationTests
         Assert.Equal(new DateOnly(2026, 11, 1), app.AppliedOn);
     }
 
+    [Theory]
+    [InlineData(ApplicationStatus.Screening)]
+    [InlineData(ApplicationStatus.Interview)]
+    [InlineData(ApplicationStatus.Offer)]
+    public void ChangeStatus_SkippingPastApplied_SetsAppliedOnWhenMissing(ApplicationStatus later)
+    {
+        var app = NewApplication();
+
+        app.ChangeStatus(later, Now, Today);
+
+        Assert.Equal(Today, app.AppliedOn);
+    }
+
+    [Fact]
+    public void ChangeStatus_SkippingPastApplied_UsesLocalDateNotUtcDate()
+    {
+        var app = NewApplication();
+        var lateUtcEvening = new DateTime(2026, 11, 21, 23, 30, 0, DateTimeKind.Utc);
+
+        app.ChangeStatus(ApplicationStatus.Interview, lateUtcEvening, new DateOnly(2026, 11, 22));
+
+        Assert.Equal(new DateOnly(2026, 11, 22), app.AppliedOn);
+    }
+
+    [Fact]
+    public void ChangeStatus_LaterStage_KeepsExistingAppliedOn()
+    {
+        var app = NewApplication();
+        app.ChangeStatus(ApplicationStatus.Applied, Now, Today);
+
+        app.ChangeStatus(ApplicationStatus.Interview, Now.AddDays(3), Today.AddDays(3));
+
+        Assert.Equal(Today, app.AppliedOn);
+    }
+
+    [Theory]
+    [InlineData(ApplicationStatus.Rejected)]
+    [InlineData(ApplicationStatus.Withdrawn)]
+    public void ChangeStatus_ClosingFromWishlist_LeavesAppliedOnEmpty(ApplicationStatus closed)
+    {
+        var app = NewApplication();
+
+        app.ChangeStatus(closed, Now, Today);
+
+        Assert.Null(app.AppliedOn);
+    }
+
+    [Theory]
+    [InlineData(ApplicationStatus.Wishlist, false)]
+    [InlineData(ApplicationStatus.Applied, true)]
+    [InlineData(ApplicationStatus.Screening, true)]
+    [InlineData(ApplicationStatus.Interview, true)]
+    [InlineData(ApplicationStatus.Offer, true)]
+    [InlineData(ApplicationStatus.Rejected, false)]
+    [InlineData(ApplicationStatus.Withdrawn, false)]
+    public void IsAppliedOrLater_covers_applied_and_later_open_stages(ApplicationStatus status, bool expected)
+    {
+        Assert.Equal(expected, status.IsAppliedOrLater());
+    }
+
     [Fact]
     public void ChangeStatus_CanSkipStages()
     {
