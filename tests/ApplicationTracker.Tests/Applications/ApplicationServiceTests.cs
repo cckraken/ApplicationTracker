@@ -400,6 +400,17 @@ public sealed class ApplicationServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task UpdateAsync_ToInterviewWithoutAppliedOn_SetsAppliedOnToToday()
+    {
+        var id = await _service.CreateAsync(Input());
+        _time.Advance(TimeSpan.FromDays(2));
+
+        await _service.UpdateAsync(id, Input(status: ApplicationStatus.Interview));
+
+        Assert.Equal(Today.AddDays(2), (await _service.GetForEditAsync(id))!.AppliedOn);
+    }
+
+    [Fact]
     public async Task UpdateAsync_ToAppliedWithAppliedOn_KeepsGivenDate()
     {
         var id = await _service.CreateAsync(Input());
