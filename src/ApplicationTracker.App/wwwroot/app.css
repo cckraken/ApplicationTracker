@@ -46,6 +46,11 @@
     --at-due-today-fg: #664d03;
     --at-due-today-border: #ffda6a;
     --at-due-today-accent: #cc9a06;
+
+    /* Stats charts: neutral bars that don't read as a status. Status bars reuse
+       the status tokens (soft fill, --at-status-*-fg edge for 3:1+ on the track). */
+    --at-chart-bar: #5a7db3; /* 3.8:1 on the track, 4.2:1 on white */
+    --at-chart-track: #f1f3f5;
 }
 
 [data-bs-theme=dark] {
@@ -83,6 +88,9 @@
     --at-due-today-fg: #ffda6a;
     --at-due-today-border: #997404;
     --at-due-today-accent: #ffc107;
+
+    --at-chart-bar: #6ea8fe; /* 5.5:1 on the track */
+    --at-chart-track: #2b3035;
 }
 
 /* ==========================================================================

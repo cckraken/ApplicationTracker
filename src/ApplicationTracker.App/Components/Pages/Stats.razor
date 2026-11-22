@@ -1,0 +1,168 @@
+@page "/stats"
+@using System.Globalization
+@using ApplicationTracker.Core.Stats
+@inject StatsService Service
+@inject ILogger<Stats> Logger
+
+<PageTitle>Stats · Application Tracker</PageTitle>
+
+<h1>Stats</h1>
+
+@if (loadError is not null)
+{
+    <div class="alert alert-danger" role="alert">@loadError</div>
+}
+else if (stats is null)
+{
+    <p class="text-body-secondary">Loading…</p>
+}
+else if (stats.TotalApplications == 0)
+{
+    <div class="empty-state mt-3">
+        <p>No applications yet, so there's nothing to count.</p>
+        <a class="btn btn-primary" href="applications/new">Add an application</a>
+    </div>
+}
+else
+{
+    <p class="stats-summary">
+        <span><strong>@stats.TotalApplications</strong> @(stats.TotalApplications == 1 ? "application" : "applications")</span>
+        <span>
+            Response rate <strong>@Percent(stats.Response.Rate)</strong>
+            @if (stats.Response.Applied == 0)
+            {
+                <span class="text-body-secondary"> (nothing applied to yet)</span>
+            }
+            else
+            {
+                <span class="text-body-secondary"> (@stats.Response.Responded of @stats.Response.Applied applied got past Applied)</span>
+            }
+        </span>
+    </p>
+
+    <div class="stats-grid">
+        <section class="stats-card">
+            <h2 id="by-status-heading" class="h5">By status</h2>
+            <table class="table table-sm stats-table" aria-labelledby="by-status-heading">
+                <thead>
+                    <tr><th scope="col">Status</th><th scope="col">Applications</th></tr>
+                </thead>
+                <tbody>
+                    @foreach (var row in stats.ByStatus)
+                    {
+                        <tr>
+                            <th scope="row"><StatusBadge Status="row.Status" /></th>
+                            <td>
+                                <div class="stats-bar-row">
+                                    <span class="stats-track" aria-hidden="true">
+                                        @if (row.Count > 0)
+                                        {
+                                            <span class="stats-bar stats-bar-status @StatusBadge.CssClassFor(row.Status)" style="width: @Width(row.Count, maxStatus)"></span>
+                                        }
+                                    </span>
+                                    <span class="stats-value">@row.Count</span>
+                                </div>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </section>
+
+        <section class="stats-card">
+            <h2 id="per-week-heading" class="h5">Applications per week</h2>
+            <p class="text-body-secondary small">By applied-on date, last @StatsService.WeeksShown weeks. Weeks start on Monday. Applications without an applied-on date (for example, moved straight past Applied) aren't counted here.</p>
+            @if (maxWeek == 0)
+            {
+                <p class="text-body-secondary small">No applications with an applied-on date in these weeks.</p>
+            }
+            <table class="table table-sm stats-table" aria-labelledby="per-week-heading">
+                <thead>
+                    <tr><th scope="col">Week starting</th><th scope="col">Applications</th></tr>
+                </thead>
+                <tbody>
+                    @for (var i = 0; i < stats.PerWeek.Count; i++)
+                    {
+                        var week = stats.PerWeek[i];
+                        <tr>
+                            <th scope="row" class="stats-week">
+                                @week.WeekStart.ToString("d MMM", CultureInfo.CurrentCulture)
+                                @if (i == stats.PerWeek.Count - 1)
+                                {
+                                    <span class="stats-this-week">(this week)</span>
+                                }
+                            </th>
+                            <td>
+                                <div class="stats-bar-row">
+                                    <span class="stats-track" aria-hidden="true">
+                                        @if (week.Count > 0)
+                                        {
+                                            <span class="stats-bar stats-bar-neutral" style="width: @Width(week.Count, maxWeek)"></span>
+                                        }
+                                    </span>
+                                    <span class="stats-value">@week.Count</span>
+                                </div>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </section>
+
+        <section class="stats-card">
+            <h2 id="time-heading" class="h5">Average time in each stage</h2>
+            <p class="text-body-secondary small">Finished stays only: the time from entering a stage to the next status change.</p>
+            <table class="table table-sm stats-table" aria-labelledby="time-heading">
+                <thead>
+                    <tr><th scope="col">Stage</th><th scope="col" class="text-end">Average</th><th scope="col" class="text-end">Finished stays</th></tr>
+                </thead>
+                <tbody>
+                    @foreach (var stage in stats.TimeInStage)
+                    {
+                        <tr>
+                            <th scope="row"><StatusBadge Status="stage.Status" /></th>
+                            <td class="text-end">@Days(stage.AverageDays)</td>
+                            <td class="text-end">@stage.Stays</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </section>
+    </div>
+}
+
+@code {
+    private StatsDashboard? stats;
+    private string? loadError;
+    private int maxStatus;
+    private int maxWeek;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            stats = await Service.GetDashboardAsync();
+            maxStatus = stats.ByStatus.Max(s => s.Count);
+            maxWeek = stats.PerWeek.Max(w => w.Count);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to load stats");
+            loadError = "The stats couldn't be loaded. Try reloading the page.";
+        }
+    }
+
+    private static string Width(int value, int max) =>
+        max == 0 ? "0%" : (100.0 * value / max).ToString("0.#", CultureInfo.InvariantCulture) + "%";
+
+    private static string Percent(double? rate) =>
+        rate is double r ? r.ToString("P0", CultureInfo.CurrentCulture) : "—";
+
+    private static string Days(double? days) => days switch
+    {
+        null => "—",
+        < 1 => "under a day",
+        double d when Math.Round(d, 1) == 1 => "1 day",
+        double d => $"{d.ToString("0.#", CultureInfo.CurrentCulture)} days",
+    };
+}

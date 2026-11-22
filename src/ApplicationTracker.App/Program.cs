@@ -4,6 +4,7 @@ using ApplicationTracker.Core.Contacts;
 using ApplicationTracker.Core.Data;
 using ApplicationTracker.Core.Notes;
 using ApplicationTracker.Core.Reminders;
+using ApplicationTracker.Core.Stats;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -33,6 +34,7 @@ builder.Services.AddScoped<ApplicationService>();
 builder.Services.AddScoped<NoteService>();
 builder.Services.AddScoped<ContactService>();
 builder.Services.AddScoped<ReminderService>();
+builder.Services.AddScoped<StatsService>();
 
 var app = builder.Build();
 
