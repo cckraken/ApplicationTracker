@@ -46,6 +46,11 @@ public class ApplicationInput
 
     [Display(Name = "Follow up on")]
     public DateOnly? FollowUpOn { get; set; }
+
+    /// <summary>The job description, pasted from the posting.</summary>
+    [StringLength(JobApplication.MaxPostingTextLength, ErrorMessage = "The job description is too long. Keep it under 20,000 characters, for example by leaving out the general \"about us\" text.")]
+    [Display(Name = "Job description")]
+    public string? PostingText { get; set; }
 }
 
 /// <summary>How urgent an application's follow-up date is, relative to today.</summary>

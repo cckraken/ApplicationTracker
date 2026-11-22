@@ -91,6 +91,16 @@
                 <InputText id="source" class="form-control" @bind-Value="Model.Source" placeholder="e.g. LinkedIn, referral" />
                 <ValidationMessage For="() => Model.Source" />
             </div>
+
+            <div class="col-12">
+                <label for="posting-text" class="form-label">Job description</label>
+                <InputTextArea id="posting-text" class="form-control" rows="6" @bind-Value="Model.PostingText"
+                               aria-describedby="posting-text-help posting-text-error" />
+                <div id="posting-text-help" class="form-text">
+                    Paste the full text of the job ad. It makes CV and cover-letter feedback fit the role, and keeps a copy if the link stops working. Up to 20,000 characters.
+                </div>
+                <div id="posting-text-error"><ValidationMessage For="() => Model.PostingText" /></div>
+            </div>
         </div>
     </fieldset>
 

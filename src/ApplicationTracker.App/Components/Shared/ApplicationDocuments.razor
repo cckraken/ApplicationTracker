@@ -42,9 +42,21 @@
                         <span class="linked-document-kind">@DocumentDisplay.Label(document.Kind)<span class="visually-hidden">:</span></span>
                         <a class="linked-document-title" href="@DocumentDisplay.FileUrl(document.Id)" download
                            aria-label="@($"Download {document.Title}")">@document.Title</a>
+                        @if (document.Kind != DocumentKind.Other)
+                        {
+                            <button type="button" class="btn btn-link btn-sm btn-quiet" @ref="feedbackButtons[document.Id]"
+                                    aria-label="@($"Get feedback on {document.Title}")"
+                                    aria-expanded="@(feedbackDocumentId == document.Id ? "true" : "false")"
+                                    @onclick="() => ToggleFeedback(document.Id)">Get feedback</button>
+                        }
                         <button type="button" class="btn btn-link btn-sm btn-quiet" @ref="unlinkButtons[document.Id]"
                                 aria-label="@($"Unlink {document.Title} from this application")"
                                 @onclick="() => UnlinkAsync(document)">Unlink</button>
+                        @if (feedbackDocumentId == document.Id)
+                        {
+                            <FeedbackPanel ApplicationId="ApplicationId" DocumentId="document.Id"
+                                           OnClose="() => CloseFeedback(document.Id)" />
+                        }
                     </li>
                 }
             </ul>
@@ -104,7 +116,31 @@
     private ElementReference heading;
     private ElementReference picker;
     private readonly Dictionary<int, ElementReference> unlinkButtons = new();
+    private readonly Dictionary<int, ElementReference> feedbackButtons = new();
     private Func<Task>? focusAfterRender;
+
+    // The document whose feedback panel is open, if any (one at a time).
+    private int? feedbackDocumentId;
+
+    private void ToggleFeedback(int documentId)
+    {
+        if (feedbackDocumentId == documentId)
+        {
+            CloseFeedback(documentId);
+            return;
+        }
+
+        feedbackDocumentId = documentId; // the panel focuses its own heading
+    }
+
+    private void CloseFeedback(int documentId)
+    {
+        feedbackDocumentId = null;
+        focusAfterRender = () =>
+            linked?.Any(d => d.Id == documentId) == true && feedbackButtons.TryGetValue(documentId, out var button)
+                ? button.FocusAsync().AsTask()
+                : heading.FocusAsync().AsTask();
+    }
 
     protected override Task OnParametersSetAsync() => LoadAsync();
 
@@ -232,6 +268,11 @@
         }
 
         unlinkButtons.Remove(document.Id);
+        feedbackButtons.Remove(document.Id);
+        if (feedbackDocumentId == document.Id)
+        {
+            feedbackDocumentId = null;
+        }
         await LoadAsync();
         if (!found)
         {

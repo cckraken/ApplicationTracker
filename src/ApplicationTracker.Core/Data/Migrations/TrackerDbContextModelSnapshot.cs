@@ -145,6 +145,10 @@ namespace ApplicationTracker.Core.Data.Migrations
                     b.Property<string>("Location")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("PostingText")
+                        .HasMaxLength(20000)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("PostingUrl")
                         .HasColumnType("TEXT");
 

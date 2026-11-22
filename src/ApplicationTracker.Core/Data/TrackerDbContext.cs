@@ -53,6 +53,7 @@ public class TrackerDbContext : DbContext
         modelBuilder.Entity<JobApplication>(e =>
         {
             e.Property(a => a.RoleTitle).HasMaxLength(200);
+            e.Property(a => a.PostingText).HasMaxLength(JobApplication.MaxPostingTextLength);
             e.HasIndex(a => a.CurrentStatus);
             e.HasIndex(a => a.FollowUpOn);
 

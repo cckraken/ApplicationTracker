@@ -24,6 +24,7 @@ One owner per job (use these; don't re-implement them):
 - Company find-or-create and unused-company cleanup: `Core/Applications/CompanyLookup.cs`.
 - Notes, contacts and reminders: `NoteService`, `ContactService` and `ReminderService`. A reminder's done state changes only through `Reminder.Complete`/`Reopen`; overdue and due-today for reminders come from `Reminder.IsOverdueOn`/`IsDueTodayOn`.
 - Documents (CV and cover-letter versions) and their files: only `DocumentService`, which is the one user of `IDocumentStore` (files in a folder per database, e.g. `data/tracker.dev-documents/`). Allowed file types and the size limit live there and on `Document`.
+- CV and cover-letter feedback packs (prompt and zip): only `FeedbackPackService` in `Core/Feedback/`, filling the embedded template `cv-feedback-prompt.md`. The app never calls an LLM or sends anything off this machine; the prompt holds only role, company, location, job description and the document, never notes, contacts or other personal details.
 - Snooze dates (follow-ups and reminders): `SnoozePeriod.DueFrom` in `Core/Applications/ApplicationModels.cs`.
 - Stats dashboard figures and week buckets: `StatsService` (`GetDashboardAsync`; Monday weeks via `StatsService.WeekStart`). The definitions are on the records in `Core/Stats/StatsModels.cs`; the UI shows them and never recomputes them.
 - Before adding logic anywhere, search `Core` for a method that already does it.
