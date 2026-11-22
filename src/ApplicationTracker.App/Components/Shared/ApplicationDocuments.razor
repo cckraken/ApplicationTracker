@@ -1,0 +1,258 @@
+@* The "Documents used" section of an application's page: which CV and cover-letter versions went
+   with this application, linking another from the library, and unlinking. Follows the Contacts
+   section of ApplicationDetail.razor (focus, announcements, one action at a time). *@
+@inject DocumentService DocumentService
+@inject ILogger<ApplicationDocuments> Logger
+
+<section class="detail-section" aria-labelledby="documents-heading">
+    <h2 id="documents-heading" class="h5" tabindex="-1" @ref="heading">
+        Documents used
+        @if (linked is not null)
+        {
+            <span class="board-count">@linked.Count<span class="visually-hidden"> @(linked.Count == 1 ? "document" : "documents")</span></span>
+        }
+    </h2>
+
+    <p class="visually-hidden" role="status" aria-live="polite">@announcement</p>
+
+    @if (error is not null)
+    {
+        <div class="alert alert-danger alert-dismissible py-2" role="alert">
+            @error
+            <button type="button" class="btn-close py-2" aria-label="Dismiss error" @onclick="() => error = null"></button>
+        </div>
+    }
+
+    @if (linked is null)
+    {
+        <p class="text-body-secondary">Loading…</p>
+    }
+    else
+    {
+        @if (linked.Count == 0)
+        {
+            <p class="text-body-secondary">No CV or cover letter linked yet.</p>
+        }
+        else
+        {
+            <ul class="linked-documents">
+                @foreach (var document in linked)
+                {
+                    <li @key="document.Id">
+                        <span class="linked-document-kind">@DocumentDisplay.Label(document.Kind)<span class="visually-hidden">:</span></span>
+                        <a class="linked-document-title" href="@DocumentDisplay.FileUrl(document.Id)" download
+                           aria-label="@($"Download {document.Title}")">@document.Title</a>
+                        <button type="button" class="btn btn-link btn-sm btn-quiet" @ref="unlinkButtons[document.Id]"
+                                aria-label="@($"Unlink {document.Title} from this application")"
+                                @onclick="() => UnlinkAsync(document)">Unlink</button>
+                    </li>
+                }
+            </ul>
+        }
+
+        @if (candidates.Count > 0)
+        {
+            <form class="link-existing" @onsubmit="LinkChosenAsync">
+                <label for="link-document" class="form-label small mb-1">Link a document</label>
+                <div class="d-flex flex-wrap gap-2">
+                    <select id="link-document" class="form-select form-select-sm w-auto mw-100" @bind="choice" @ref="picker">
+                        <option value="">Choose…</option>
+                        @foreach (var (kind, groupHeading) in DocumentDisplay.Groups)
+                        {
+                            var group = candidates.Where(d => d.Kind == kind).ToList();
+                            if (group.Count > 0)
+                            {
+                                <optgroup label="@groupHeading">
+                                    @foreach (var candidate in group)
+                                    {
+                                        <option value="@candidate.Id">@candidate.Title</option>
+                                    }
+                                </optgroup>
+                            }
+                        }
+                    </select>
+                    <button type="submit" class="btn btn-sm btn-outline-primary" disabled="@string.IsNullOrEmpty(choice)">Link</button>
+                </div>
+            </form>
+        }
+
+        <p class="small text-body-secondary mt-3 mb-0">
+            @if (linked.Count == 0 && candidates.Count == 0)
+            {
+                <text>Upload your CV and cover letters on the <a href="documents">Documents page</a>, then link them here.</text>
+            }
+            else
+            {
+                <text>Upload and manage versions on the <a href="documents">Documents page</a>.</text>
+            }
+        </p>
+    }
+</section>
+
+@code {
+    [Parameter, EditorRequired] public int ApplicationId { get; set; }
+
+    private IReadOnlyList<DocumentSummary>? linked;
+    private List<DocumentSummary> candidates = [];
+    private string choice = "";
+    private string? error;
+    private string announcement = "";
+
+    // True while an action (write + reload) is running; see Exclusive.
+    private bool busy;
+
+    private ElementReference heading;
+    private ElementReference picker;
+    private readonly Dictionary<int, ElementReference> unlinkButtons = new();
+    private Func<Task>? focusAfterRender;
+
+    protected override Task OnParametersSetAsync() => LoadAsync();
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (focusAfterRender is { } focus)
+        {
+            focusAfterRender = null;
+            try
+            {
+                await focus();
+            }
+            catch (JSException)
+            {
+                // The element went away before it could be focused; nothing useful to do.
+            }
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            var forApplication = await DocumentService.GetForApplicationAsync(ApplicationId);
+            var all = await DocumentService.ListAsync();
+            var linkedIds = forApplication.Select(d => d.Id).ToHashSet();
+            linked = forApplication;
+            candidates = all.Where(d => !linkedIds.Contains(d.Id)).ToList();
+            if (!candidates.Any(c => c.Id.ToString() == choice))
+            {
+                choice = "";
+            }
+        }
+        catch (Exception ex)
+        {
+            // Keep what is showing; an unhandled exception would end the whole circuit.
+            Logger.LogError(ex, "Failed to load documents for application {ApplicationId}", ApplicationId);
+            error ??= "The documents couldn't be loaded. Try reloading the page.";
+            linked ??= [];
+        }
+    }
+
+    /// <summary>
+    /// Runs a whole action handler (write, reload, focus) on its own. A click that Blazor Server
+    /// dispatches while an action is still running is ignored rather than writing twice.
+    /// </summary>
+    private async Task Exclusive(Func<Task> action)
+    {
+        if (busy)
+        {
+            return;
+        }
+
+        busy = true;
+        try
+        {
+            await action();
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    /// <summary>Runs one write; call it from inside <see cref="Exclusive"/>.</summary>
+    private async Task<bool> WriteAsync(Func<Task> write, string what)
+    {
+        try
+        {
+            await write();
+            error = null; // an old error shouldn't sit above a later success
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "{What} failed for application {ApplicationId}", what, ApplicationId);
+            error = $"Couldn't {what.ToLowerInvariant()}. Please try again.";
+            await LoadAsync();
+            focusAfterRender = () => heading.FocusAsync().AsTask();
+            return false;
+        }
+    }
+
+    private Task LinkChosenAsync() => Exclusive(LinkChosenCoreAsync);
+
+    private async Task LinkChosenCoreAsync()
+    {
+        if (!int.TryParse(choice, out var documentId))
+        {
+            return;
+        }
+
+        var title = candidates.FirstOrDefault(c => c.Id == documentId)?.Title ?? "The document";
+        var found = false;
+        if (!await WriteAsync(async () => found = await DocumentService.LinkAsync(ApplicationId, documentId), "Link the document"))
+        {
+            return;
+        }
+
+        choice = "";
+        await LoadAsync();
+        if (!found)
+        {
+            error = $"{title} no longer exists. It may have been deleted on the Documents page.";
+            focusAfterRender = () => heading.FocusAsync().AsTask();
+            return;
+        }
+
+        Announce($"{title} linked.");
+        // Stay on the picker while there is more to link (a CV and a cover letter, say);
+        // otherwise go to the new item. Ask the data, not the @ref dictionary.
+        focusAfterRender = () =>
+            candidates.Count > 0 ? picker.FocusAsync().AsTask()
+            : FocusUnlinkOrHeading(documentId);
+    }
+
+    private Task UnlinkAsync(DocumentSummary document) => Exclusive(() => UnlinkCoreAsync(document));
+
+    private async Task UnlinkCoreAsync(DocumentSummary document)
+    {
+        var found = false;
+        if (!await WriteAsync(async () => found = await DocumentService.UnlinkAsync(ApplicationId, document.Id), "Unlink the document"))
+        {
+            return;
+        }
+
+        unlinkButtons.Remove(document.Id);
+        await LoadAsync();
+        if (!found)
+        {
+            error = "This application no longer exists. It may have been deleted elsewhere.";
+            focusAfterRender = () => heading.FocusAsync().AsTask();
+            return;
+        }
+
+        Announce($"{document.Title} unlinked.");
+        focusAfterRender = () => heading.FocusAsync().AsTask();
+    }
+
+    private Task FocusUnlinkOrHeading(int documentId) =>
+        (linked?.Any(d => d.Id == documentId) == true && unlinkButtons.TryGetValue(documentId, out var button)
+            ? button
+            : heading).FocusAsync().AsTask();
+
+    /// <summary>
+    /// Sets the live region text. The same text twice in a row would be silent (nothing changed),
+    /// so a trailing no-break space is toggled to make it change.
+    /// </summary>
+    private void Announce(string text) =>
+        announcement = announcement == text ? text + " " : text;
+}

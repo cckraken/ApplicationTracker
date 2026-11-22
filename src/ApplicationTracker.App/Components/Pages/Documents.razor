@@ -1,0 +1,483 @@
+@page "/documents"
+@using System.ComponentModel.DataAnnotations
+@inject DocumentService DocumentService
+@inject TimeProvider Time
+@inject ILogger<Documents> Logger
+
+<PageTitle>Documents · Application Tracker</PageTitle>
+
+<h1>Documents</h1>
+<p class="text-body-secondary">
+    Your CV and cover-letter versions. Upload each version once, then link it to the applications you used it for.
+    Files stay on this computer, next to the tracker's database.
+</p>
+
+@if (errorNotice is not null)
+{
+    <div class="alert alert-danger alert-dismissible" role="alert">
+        @errorNotice
+        <button type="button" class="btn-close" aria-label="Dismiss error" @onclick="() => errorNotice = null"></button>
+    </div>
+}
+
+<p class="visually-hidden" role="status" aria-live="polite">@announcement</p>
+
+<section class="document-upload mb-4" aria-labelledby="upload-heading">
+    <h2 id="upload-heading" class="h5">Upload a version</h2>
+    <EditForm Model="upload" OnValidSubmit="UploadAsync" FormName="document-upload">
+        <DataAnnotationsValidator />
+        <div class="document-upload-fields">
+            <div>
+                <label for="upload-kind" class="form-label">Kind</label>
+                <InputSelect id="upload-kind" class="form-select" @bind-Value="upload.Kind">
+                    @foreach (var (kind, _) in DocumentDisplay.Groups)
+                    {
+                        <option value="@kind">@DocumentDisplay.Label(kind)</option>
+                    }
+                </InputSelect>
+            </div>
+            <div>
+                <label for="upload-file" class="form-label">File</label>
+                @* Re-keyed after each upload so the browser forgets the previous file. *@
+                <InputFile @key="fileInputKey" id="upload-file" class="form-control" OnChange="FileChosen"
+                           accept="@DocumentService.AcceptedExtensions" aria-describedby="upload-file-help" />
+                <div id="upload-file-help" class="form-text">PDF, Word (.docx), .txt or .md, up to @MaxMegabytes MB.</div>
+            </div>
+            <div>
+                <label for="upload-title" class="form-label">Version name</label>
+                <InputText id="upload-title" class="form-control" @bind-Value="upload.Title" autocomplete="off"
+                           aria-required="true" aria-describedby="upload-title-help upload-title-error" />
+                <div id="upload-title-help" class="form-text">Filled in from the file name; change it so you can tell versions apart.</div>
+                <div id="upload-title-error"><ValidationMessage For="() => upload.Title" /></div>
+            </div>
+        </div>
+        @if (uploadError is not null)
+        {
+            <div class="alert alert-danger py-2 mt-2 mb-0" role="alert">@uploadError</div>
+        }
+        <button type="submit" class="btn btn-primary mt-3" disabled="@busy">@(uploading ? "Uploading…" : "Upload")</button>
+    </EditForm>
+</section>
+
+@if (documents is null)
+{
+    <p>Loading…</p>
+}
+else if (documents.Count == 0)
+{
+    <div class="empty-state">
+        <h2 class="h5" tabindex="-1" @ref="emptyHeading">No documents yet</h2>
+        <p>Upload your CV above. You can then link it to applications from each application's page.</p>
+    </div>
+}
+else
+{
+    <p class="results-summary" tabindex="-1" @ref="summary">
+        @documents.Count @(documents.Count == 1 ? "document" : "documents")
+    </p>
+
+    @foreach (var (kind, groupHeading) in DocumentDisplay.Groups)
+    {
+        var group = documents.Where(d => d.Kind == kind).ToList();
+        if (group.Count == 0)
+        {
+            continue;
+        }
+
+        <section class="mb-4" aria-labelledby="@($"group-{kind}")">
+            <h2 id="@($"group-{kind}")" class="h5">@groupHeading</h2>
+            <ul class="document-list">
+                @foreach (var document in group)
+                {
+                    <li class="document-item" @key="document.Id">
+                        @if (editingId == document.Id)
+                        {
+                            <h3 class="h6 document-edit-heading">Rename “@document.Title”</h3>
+                            <EditForm Model="edit" OnValidSubmit="() => SaveEditAsync(document)" FormName="@($"document-edit-{document.Id}")">
+                                <DataAnnotationsValidator />
+                                <div class="document-edit-fields">
+                                    <div>
+                                        <label for="@($"edit-kind-{document.Id}")" class="form-label">Kind</label>
+                                        <InputSelect id="@($"edit-kind-{document.Id}")" class="form-select" @bind-Value="edit.Kind">
+                                            @foreach (var (k, _) in DocumentDisplay.Groups)
+                                            {
+                                                <option value="@k">@DocumentDisplay.Label(k)</option>
+                                            }
+                                        </InputSelect>
+                                    </div>
+                                    <div>
+                                        <label for="@($"edit-title-{document.Id}")" class="form-label">Version name</label>
+                                        <InputText id="@($"edit-title-{document.Id}")" class="form-control" @bind-Value="edit.Title"
+                                                   @ref="editTitleInput" autocomplete="off" aria-required="true"
+                                                   aria-describedby="@($"edit-title-error-{document.Id}")" />
+                                        <div id="@($"edit-title-error-{document.Id}")"><ValidationMessage For="() => edit.Title" /></div>
+                                    </div>
+                                </div>
+                                @if (editError is not null)
+                                {
+                                    <div class="alert alert-danger py-2 mt-2 mb-0" role="alert">@editError</div>
+                                }
+                                <div class="mt-2 d-flex flex-wrap gap-2">
+                                    <button type="submit" class="btn btn-primary btn-sm" disabled="@busy">Save</button>
+                                    <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="() => CancelEdit(document)">Cancel</button>
+                                </div>
+                            </EditForm>
+                        }
+                        else
+                        {
+                            <div class="document-main">
+                                <a class="document-title" href="@DocumentDisplay.FileUrl(document.Id)" download
+                                   aria-label="@($"Download {document.Title}")">@document.Title</a>
+                                <span class="document-meta">
+                                    <span class="document-file-name">@document.OriginalFileName</span> ·
+                                    @DocumentDisplay.Size(document.SizeBytes) ·
+                                    added @LocalDate(document.CreatedAt) ·
+                                    @UsedBy(document.ApplicationCount)
+                                </span>
+                            </div>
+                            @if (pendingDeleteId == document.Id)
+                            {
+                                <div class="document-confirm" role="group" aria-labelledby="@($"document-delete-{document.Id}")"
+                                     @onkeydown="e => OnConfirmKeyDown(e, document)">
+                                    <span id="@($"document-delete-{document.Id}")">
+                                        Delete “@document.Title” and its file permanently?@(document.ApplicationCount > 0 ? " The applications are kept; only the links go." : "")
+                                    </span>
+                                    <span class="document-confirm-buttons">
+                                        <button type="button" class="btn btn-danger btn-sm" @onclick="() => DeleteAsync(document)">Delete</button>
+                                        <button type="button" class="btn btn-outline-secondary btn-sm" @ref="deleteCancelButton"
+                                                @onclick="() => CancelDelete(document)">Cancel</button>
+                                    </span>
+                                </div>
+                            }
+                            else
+                            {
+                                <div class="item-actions">
+                                    <button type="button" class="btn btn-link btn-sm btn-quiet" @ref="renameButtons[document.Id]"
+                                            aria-label="@($"Rename {document.Title}")" @onclick="() => StartEditAsync(document)">Rename</button>
+                                    <button type="button" class="btn btn-link btn-sm btn-quiet btn-quiet-danger" @ref="deleteButtons[document.Id]"
+                                            aria-label="@($"Delete {document.Title}")" @onclick="() => RequestDelete(document)">Delete</button>
+                                </div>
+                            }
+                        }
+                    </li>
+                }
+            </ul>
+        </section>
+    }
+}
+
+@code {
+    private static readonly long MaxMegabytes = Document.MaxSizeBytes / (1024 * 1024);
+
+    private IReadOnlyList<DocumentSummary>? documents;
+    private DocumentInput upload = new();
+    private IBrowserFile? chosenFile;
+    private string? suggestedTitle; // the version name filled in from the file name, until edited
+    private int fileInputKey;
+    private DocumentInput edit = new();
+    private int? editingId;
+    private int? pendingDeleteId;
+    private string? uploadError;
+    private string? editError;
+    private string? errorNotice;
+    private string announcement = "";
+
+    // True while an action (write + reload + reset) is running; see Exclusive.
+    private bool busy;
+    private bool uploading;
+
+    private ElementReference summary;
+    private ElementReference emptyHeading;
+    private ElementReference deleteCancelButton;
+    private InputText? editTitleInput;
+    private readonly Dictionary<int, ElementReference> renameButtons = new();
+    private readonly Dictionary<int, ElementReference> deleteButtons = new();
+    private Func<Task>? focusAfterRender;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (focusAfterRender is { } focus)
+        {
+            focusAfterRender = null;
+            try
+            {
+                await focus();
+            }
+            catch (JSException)
+            {
+                // The element went away before it could be focused; nothing useful to do.
+            }
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            documents = await DocumentService.ListAsync();
+        }
+        catch (Exception ex)
+        {
+            // Keep what is showing; an unhandled exception would end the whole circuit.
+            Logger.LogError(ex, "Failed to load documents");
+            errorNotice ??= "The documents couldn't be loaded. Try reloading the page.";
+            documents ??= [];
+        }
+    }
+
+    /// <summary>
+    /// Runs a whole action handler (write, reload, reset) on its own. A click that Blazor Server
+    /// dispatches while an action is still running is ignored rather than writing twice.
+    /// </summary>
+    private async Task Exclusive(Func<Task> action)
+    {
+        if (busy)
+        {
+            return;
+        }
+
+        busy = true;
+        try
+        {
+            await action();
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private void FileChosen(InputFileChangeEventArgs e)
+    {
+        uploadError = null;
+
+        // Cancelling the file dialog can report no file; e.File would throw.
+        if (e.FileCount == 0)
+        {
+            chosenFile = null;
+            return;
+        }
+
+        chosenFile = e.File;
+
+        // Suggest a version name from the file name if none was typed, and keep following the chosen
+        // file until the user edits the suggestion.
+        if (string.IsNullOrWhiteSpace(upload.Title) || upload.Title == suggestedTitle)
+        {
+            suggestedTitle = Path.GetFileNameWithoutExtension(e.File.Name).Trim();
+            upload.Title = suggestedTitle;
+        }
+    }
+
+    private Task UploadAsync() => Exclusive(UploadCoreAsync);
+
+    private async Task UploadCoreAsync()
+    {
+        uploadError = null;
+        if (chosenFile is null)
+        {
+            uploadError = "Choose a file to upload.";
+            return;
+        }
+        if (chosenFile.Size > Document.MaxSizeBytes)
+        {
+            uploadError = $"That file is too large. The limit is {MaxMegabytes} MB.";
+            return;
+        }
+
+        uploading = true;
+        try
+        {
+            var title = upload.Title;
+            await using (var stream = chosenFile.OpenReadStream(Document.MaxSizeBytes))
+            {
+                await DocumentService.UploadAsync(upload, stream, chosenFile.Name);
+            }
+
+            upload = new DocumentInput { Kind = upload.Kind };
+            suggestedTitle = null;
+            chosenFile = null;
+            fileInputKey++;
+            errorNotice = null;
+            await LoadAsync();
+            Announce($"{title} uploaded.");
+        }
+        catch (ValidationException ex)
+        {
+            uploadError = ex.Message;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to upload a document");
+            uploadError = "The file couldn't be uploaded. Please try again.";
+        }
+        finally
+        {
+            uploading = false;
+        }
+    }
+
+    private Task StartEditAsync(DocumentSummary document) => Exclusive(() => StartEditCoreAsync(document));
+
+    private async Task StartEditCoreAsync(DocumentSummary document)
+    {
+        pendingDeleteId = null;
+        editError = null;
+        try
+        {
+            var input = await DocumentService.GetForEditAsync(document.Id);
+            if (input is null)
+            {
+                errorNotice = $"{document.Title} no longer exists. It may have been deleted elsewhere.";
+                await LoadAsync();
+                focusAfterRender = FocusSummaryOrEmpty;
+                return;
+            }
+
+            edit = input;
+            editingId = document.Id;
+            focusAfterRender = () => editTitleInput?.Element is { } element ? element.FocusAsync().AsTask() : Task.CompletedTask;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to open document {DocumentId} for editing", document.Id);
+            errorNotice = "The document couldn't be opened. Please try again.";
+        }
+    }
+
+    private void CancelEdit(DocumentSummary document)
+    {
+        editingId = null;
+        editError = null;
+        focusAfterRender = () => FocusButtonOrSummary(renameButtons, document.Id);
+    }
+
+    private Task SaveEditAsync(DocumentSummary document) => Exclusive(() => SaveEditCoreAsync(document));
+
+    private async Task SaveEditCoreAsync(DocumentSummary document)
+    {
+        if (editingId != document.Id)
+        {
+            return; // a late second click: the form already closed
+        }
+
+        editError = null;
+        DocumentUpdateResult result;
+        try
+        {
+            result = await DocumentService.UpdateAsync(document.Id, edit);
+        }
+        catch (ValidationException ex)
+        {
+            editError = ex.Message;
+            return;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to save document {DocumentId}", document.Id);
+            editError = "The changes couldn't be saved. Please try again.";
+            return;
+        }
+
+        editingId = null;
+        errorNotice = null;
+        await LoadAsync();
+        if (result == DocumentUpdateResult.NotFound)
+        {
+            errorNotice = $"{document.Title} no longer exists. It may have been deleted elsewhere.";
+            focusAfterRender = FocusSummaryOrEmpty;
+            return;
+        }
+        if (result == DocumentUpdateResult.ChangedElsewhere)
+        {
+            errorNotice = $"{document.Title} was changed elsewhere while you were editing, so your changes weren't saved. The list now shows the latest version; rename it again if needed.";
+            focusAfterRender = () => FocusButtonOrSummary(renameButtons, document.Id);
+            return;
+        }
+
+        Announce($"{edit.Title} saved.");
+        // The kind may have changed, moving it to another group; its button is found by id.
+        focusAfterRender = () => FocusButtonOrSummary(renameButtons, document.Id);
+    }
+
+    private void RequestDelete(DocumentSummary document)
+    {
+        editingId = null;
+        pendingDeleteId = document.Id;
+        focusAfterRender = () => deleteCancelButton.FocusAsync().AsTask();
+    }
+
+    private void CancelDelete(DocumentSummary document)
+    {
+        pendingDeleteId = null;
+        focusAfterRender = () => FocusButtonOrSummary(deleteButtons, document.Id);
+    }
+
+    private void OnConfirmKeyDown(KeyboardEventArgs e, DocumentSummary document)
+    {
+        if (e.Key == "Escape")
+        {
+            CancelDelete(document);
+        }
+    }
+
+    private Task DeleteAsync(DocumentSummary document) => Exclusive(() => DeleteCoreAsync(document));
+
+    private async Task DeleteCoreAsync(DocumentSummary document)
+    {
+        if (pendingDeleteId != document.Id)
+        {
+            return; // a late second click: the confirmation already closed
+        }
+
+        pendingDeleteId = null;
+        try
+        {
+            await DocumentService.DeleteAsync(document.Id);
+            errorNotice = null;
+            Announce($"{document.Title} deleted.");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to delete document {DocumentId}", document.Id);
+            errorNotice = "The document couldn't be deleted. Please try again.";
+        }
+
+        renameButtons.Remove(document.Id);
+        deleteButtons.Remove(document.Id);
+        await LoadAsync();
+        focusAfterRender = FocusSummaryOrEmpty;
+    }
+
+    private Task FocusButtonOrSummary(Dictionary<int, ElementReference> refs, int id) =>
+        IsShown(id) && refs.TryGetValue(id, out var button) ? button.FocusAsync().AsTask() : FocusSummaryOrEmpty();
+
+    private Task FocusSummaryOrEmpty() =>
+        (documents is { Count: > 0 } ? summary : emptyHeading).FocusAsync().AsTask();
+
+    /// <summary>
+    /// Whether the document is in the list. A @ref dictionary entry outlives its element,
+    /// so ask the data rather than the dictionary.
+    /// </summary>
+    private bool IsShown(int id) => documents?.Any(d => d.Id == id) == true;
+
+    private string LocalDate(DateTime utc) =>
+        TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(utc, DateTimeKind.Utc), Time.LocalTimeZone)
+            .ToString("d MMM yyyy");
+
+    private static string UsedBy(int count) => count switch
+    {
+        0 => "not used yet",
+        1 => "used for 1 application",
+        _ => $"used for {count} applications",
+    };
+
+    /// <summary>
+    /// Sets the live region text. The same text twice in a row would be silent (nothing changed),
+    /// so a trailing no-break space is toggled to make it change.
+    /// </summary>
+    private void Announce(string text) =>
+        announcement = announcement == text ? text + " " : text;
+}

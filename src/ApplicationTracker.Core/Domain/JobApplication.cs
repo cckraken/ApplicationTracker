@@ -32,6 +32,9 @@ public class JobApplication
     public List<Reminder> Reminders { get; } = [];
     public List<Contact> Contacts { get; } = [];
 
+    /// <summary>The document versions (CV, cover letter) used for this application.</summary>
+    public List<Document> Documents { get; } = [];
+
     /// <summary>
     /// Moves the application to <paramref name="newStatus"/> and records the change in
     /// <see cref="StatusHistory"/>. Moving to the current status is a no-op.

@@ -810,7 +810,8 @@ h1:focus {
         margin-top: 0.25rem;
     }
 
-.link-contact {
+/* "Or link an existing contact" / "Link a document" picker under a sidebar list. */
+.link-existing {
     margin-top: 0.75rem;
 }
 

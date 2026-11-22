@@ -33,11 +33,13 @@ public class TrackerDbContext : DbContext
     public DbSet<Note> Notes => Set<Note>();
     public DbSet<StatusChange> StatusChanges => Set<StatusChange>();
     public DbSet<Reminder> Reminders => Set<Reminder>();
+    public DbSet<Document> Documents => Set<Document>();
 
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
     {
         // All enums are stored as readable strings.
         configurationBuilder.Properties<ApplicationStatus>().HaveConversion<string>().HaveMaxLength(20);
+        configurationBuilder.Properties<DocumentKind>().HaveConversion<string>().HaveMaxLength(20);
 
         // SQLite has no timezone; everything is stored as UTC and read back marked as UTC.
         configurationBuilder.Properties<DateTime>().HaveConversion<UtcDateTimeConverter>();
@@ -68,6 +70,19 @@ public class TrackerDbContext : DbContext
 
             e.HasMany(a => a.Contacts).WithMany(c => c.Applications)
                 .UsingEntity(j => j.ToTable("ApplicationContacts"));
+
+            // Documents live in the library: deleting an application only removes its links.
+            e.HasMany(a => a.Documents).WithMany(d => d.Applications)
+                .UsingEntity(j => j.ToTable("ApplicationDocuments"));
+        });
+
+        modelBuilder.Entity<Document>(e =>
+        {
+            e.Property(d => d.Title).HasMaxLength(Document.MaxTitleLength);
+            e.Property(d => d.OriginalFileName).HasMaxLength(255);
+            e.Property(d => d.StoredFileName).HasMaxLength(100);
+            e.Property(d => d.ContentType).HasMaxLength(100);
+            e.HasIndex(d => d.StoredFileName).IsUnique();
         });
 
         modelBuilder.Entity<Company>(e =>
