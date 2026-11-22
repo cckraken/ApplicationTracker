@@ -1,0 +1,6 @@
+# Windows batch files must keep CRLF line endings, or cmd.exe can misread them.
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# The release's plain-text readme opens in Notepad.
+packaging/windows/*.txt text eol=crlf

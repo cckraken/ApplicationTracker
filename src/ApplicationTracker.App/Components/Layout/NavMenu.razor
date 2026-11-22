@@ -50,4 +50,16 @@
             </NavLink>
         </div>
     </nav>
+
+    <p class="app-version px-3">Version @AppVersion</p>
 </div>
+
+@code {
+    /// <summary>The app's version (set from the release tag), without any build metadata.</summary>
+    private static readonly string AppVersion =
+        (typeof(NavMenu).Assembly
+            .GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
+            .OfType<System.Reflection.AssemblyInformationalVersionAttribute>()
+            .FirstOrDefault()?.InformationalVersion ?? "unknown")
+        .Split('+')[0];
+}

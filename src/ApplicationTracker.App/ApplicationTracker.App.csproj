@@ -16,6 +16,10 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
+    <!-- Shown in the nav menu. The release workflow sets it from the git tag (-p:Version=1.0.0). -->
+    <Version>0.0.0-dev</Version>
+    <!-- Keep the plain version (no "+commit" suffix) for display. -->
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
   </PropertyGroup>
 
 </Project>

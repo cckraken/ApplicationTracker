@@ -51,6 +51,9 @@
        the status tokens (soft fill, --at-status-*-fg edge for 3:1+ on the track). */
     --at-chart-bar: #5a7db3; /* 3.8:1 on the track, 4.2:1 on white */
     --at-chart-track: #f1f3f5;
+
+    /* Quiet text on the always-dark sidebar (same in both themes). */
+    --at-nav-muted: rgba(255, 255, 255, 0.8);
 }
 
 [data-bs-theme=dark] {

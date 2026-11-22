@@ -141,3 +141,10 @@
 .bi-file-text-nav-menu {
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='white' viewBox='0 0 16 16'%3E%3Cpath d='M4 0h5.5L14 4.5V14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2a2 2 0 0 1 2-2zm5 1v3.5A1.5 1.5 0 0 0 10.5 6H13v-.5L9.5 2H9zM5 8.5a.5.5 0 0 0 0 1h6a.5.5 0 0 0 0-1H5zm0 2a.5.5 0 0 0 0 1h6a.5.5 0 0 0 0-1H5zm0 2a.5.5 0 0 0 0 1h4a.5.5 0 0 0 0-1H5z'/%3E%3C/svg%3E");
 }
+
+/* Small and quiet, but readable (white at 80% on the dark sidebar is well above 4.5:1). */
+.app-version {
+    margin: 1.5rem 0 1rem;
+    font-size: 0.75rem;
+    color: var(--at-nav-muted);
+}

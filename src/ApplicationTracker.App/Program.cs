@@ -1,4 +1,5 @@
 using ApplicationTracker.App.Components;
+using ApplicationTracker.Core;
 using ApplicationTracker.Core.Applications;
 using ApplicationTracker.Core.Contacts;
 using ApplicationTracker.Core.Data;
@@ -19,11 +20,16 @@ builder.WebHost.UseStaticWebAssets();
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
-// The database lives in the repo-root data/ folder (gitignored). The default is the dev
-// database, tracker.dev.db; only run.ps1 opts in to the real one by passing
-// --Tracker:DatabaseFile tracker.db. Development also seeds demo data into an empty dev DB.
+// The database lives in the repo-root data/ folder (gitignored) when running from the repo, or
+// in %LOCALAPPDATA%\ApplicationTracker\data for an installed copy (see DataLocation). The default
+// is the dev database, tracker.dev.db; only run.ps1 and the release (its start script and its
+// generated appsettings.Production.json) opt in to the real one, tracker.db. Development also seeds demo data into an
+// empty dev DB.
 var tracker = builder.Configuration.GetSection("Tracker");
-var dataDirectory = ResolveDataDirectory(tracker["DataDirectory"] ?? "data", builder.Environment.ContentRootPath);
+var dataDirectory = DataLocation.ResolveDirectory(
+    tracker["DataDirectory"] ?? "data",
+    builder.Environment.ContentRootPath,
+    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
 var databasePath = Path.Combine(dataDirectory, tracker["DatabaseFile"] ?? "tracker.dev.db");
 var seedDemoData = tracker.GetValue<bool>("SeedDemoData");
 
@@ -60,6 +66,29 @@ using (var db = app.Services.GetRequiredService<IDbContextFactory<TrackerDbConte
 
 app.Logger.LogInformation("Using database {DatabasePath}", databasePath);
 
+// The release turns this on (Tracker:OpenBrowser) so a double-clicked start opens the app in the
+// default browser once it is actually listening; a failed start (port busy) opens nothing.
+if (tracker.GetValue<bool>("OpenBrowser"))
+{
+    app.Lifetime.ApplicationStarted.Register(() =>
+    {
+        var url = app.Urls.FirstOrDefault();
+        if (url is null)
+        {
+            return;
+        }
+
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            app.Logger.LogWarning(ex, "Couldn't open the browser; go to {Url} yourself", url);
+        }
+    });
+}
+
 // Configure the HTTP request pipeline.
 // The app only runs on localhost over HTTP, so there is no HTTPS redirect or HSTS.
 // Hosting it online would need those back, plus authentication.
@@ -91,24 +120,3 @@ app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 
 app.Run();
-
-// A relative data directory is resolved against the repo root (the folder holding
-// ApplicationTracker.slnx), so it lands in the same place however the app is started
-// (dotnet run, run.ps1, or the exe in bin/). Falls back to the content root.
-static string ResolveDataDirectory(string configured, string contentRoot)
-{
-    if (Path.IsPathRooted(configured))
-    {
-        return configured;
-    }
-
-    for (var dir = new DirectoryInfo(contentRoot); dir is not null; dir = dir.Parent)
-    {
-        if (File.Exists(Path.Combine(dir.FullName, "ApplicationTracker.slnx")))
-        {
-            return Path.GetFullPath(Path.Combine(dir.FullName, configured));
-        }
-    }
-
-    return Path.GetFullPath(Path.Combine(contentRoot, configured));
-}
