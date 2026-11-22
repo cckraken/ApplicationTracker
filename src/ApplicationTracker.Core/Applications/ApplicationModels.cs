@@ -57,6 +57,37 @@ public enum FollowUpState
     Overdue,
 }
 
+/// <summary>How far to push a follow-up or reminder back, counted from today.</summary>
+public enum SnoozePeriod
+{
+    Tomorrow,
+    NextWeek,
+}
+
+public static class SnoozePeriodExtensions
+{
+    /// <summary>The new due date: from today, not from the old date, so an overdue item lands in the future.</summary>
+    public static DateOnly DueFrom(this SnoozePeriod period, DateOnly today) => period switch
+    {
+        SnoozePeriod.Tomorrow => today.AddDays(1),
+        SnoozePeriod.NextWeek => today.AddDays(7),
+        _ => throw new ArgumentOutOfRangeException(nameof(period), period, "Unknown snooze period."),
+    };
+}
+
+/// <summary>What a follow-up action (done or snooze) did.</summary>
+public enum FollowUpActionOutcome
+{
+    /// <summary>Saved.</summary>
+    Done,
+
+    /// <summary>The follow-up date was changed elsewhere since the page loaded; nothing was saved.</summary>
+    Changed,
+
+    /// <summary>The application doesn't exist (deleted elsewhere).</summary>
+    NotFound,
+}
+
 /// <summary>One row of the applications list.</summary>
 public sealed record ApplicationSummary(
     int Id,

@@ -1,0 +1,8 @@
+/* Actions get their own row under the follow-up's name and badges. */
+.follow-up-actions {
+    display: flex;
+    flex-basis: 100%;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.25rem 1rem;
+}

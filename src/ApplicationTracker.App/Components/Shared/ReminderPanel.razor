@@ -1,0 +1,731 @@
+@using System.ComponentModel.DataAnnotations
+@inject ReminderService Reminders
+@inject TimeProvider Time
+@inject ILogger<ReminderPanel> Logger
+
+@* A self-contained reminders section: loads, adds, edits, completes, snoozes and deletes on its own.
+   Used on the Today page (DueOnly), an application's detail page (ApplicationId) and the
+   Reminders page (everything). It follows ApplicationDetail.razor's patterns. *@
+<section class="@SectionClass" aria-labelledby="@Id("heading")">
+    <p class="visually-hidden" role="status" aria-live="polite">@announcement</p>
+
+    <div class="section-header">
+        <h2 id="@Id("heading")" class="@HeadingClass" tabindex="-1" @ref="heading">
+            @Title
+            @if (list is not null)
+            {
+                <span class="board-count">@list.Open.Count<span class="visually-hidden"> @CountLabel(list.Open.Count)</span></span>
+            }
+        </h2>
+        @if (list is not null && !FormOpen)
+        {
+            <button type="button" class="btn btn-outline-primary btn-sm" @ref="addButton" @onclick="StartAddAsync">Add reminder</button>
+        }
+    </div>
+
+    @if (notice is not null)
+    {
+        <div class="alert alert-success alert-dismissible py-2 mb-2">
+            @notice
+            <button type="button" class="btn-close" aria-label="Dismiss message" @onclick="() => notice = null"></button>
+        </div>
+    }
+
+    @if (errorNotice is not null)
+    {
+        <div class="alert alert-danger alert-dismissible py-2 mb-2" role="alert">
+            @errorNotice
+            <button type="button" class="btn-close" aria-label="Dismiss error" @onclick="() => errorNotice = null"></button>
+        </div>
+    }
+
+    @if (adding)
+    {
+        <div class="reminder-card mb-2">
+            <h3 class="h6">New reminder</h3>
+            <ReminderForm @ref="addForm" IdPrefix="@Id("new")" Model="newInput"
+                          ShowApplicationPicker="ApplicationId is null" Applications="choices"
+                          SubmitLabel="Add reminder" Busy="busy" Error="@formError"
+                          OnValidSubmit="AddAsync" OnCancel="CancelAdd" />
+        </div>
+    }
+
+    @if (list is null)
+    {
+        @if (loadFailed)
+        {
+            <div class="alert alert-danger mb-0" role="alert">Couldn't load reminders. Please reload the page.</div>
+        }
+        else
+        {
+            <p class="text-body-secondary mb-0">Loading reminders…</p>
+        }
+    }
+    else
+    {
+        @if (list.Open.Count == 0)
+        {
+            <p class="text-body-secondary mb-0">@EmptyText</p>
+        }
+        else
+        {
+            <ul class="reminder-list">
+                @foreach (var reminder in list.Open)
+                {
+                    <li @key="reminder.Id" class="reminder-card @StateClass(reminder.State)">
+                        @if (editingId == reminder.Id && editInput is not null)
+                        {
+                            <h3 class="h6">Edit reminder</h3>
+                            <ReminderForm @ref="editForm" IdPrefix="@Id($"edit-{reminder.Id}")" Model="editInput"
+                                          ShowApplicationPicker="ApplicationId is null" Applications="choices"
+                                          SubmitLabel="Save reminder" Busy="busy" Error="@formError"
+                                          OnValidSubmit="() => SaveAsync(reminder)" OnCancel="() => CancelEdit(reminder)" />
+                        }
+                        else
+                        {
+                            <div class="reminder-text">@reminder.Text</div>
+                            <div class="reminder-meta">
+                                <FollowUpBadge State="reminder.State" />
+                                @* The "Due today" badge already says it all. *@
+                                @if (reminder.State != FollowUpState.DueToday)
+                                {
+                                    <span class="@DateClass(reminder.State)">Due <time datetime="@reminder.DueOn.ToString("yyyy-MM-dd")">@DueText(reminder.DueOn)</time></span>
+                                }
+                                @AppLink(reminder)
+                            </div>
+                            @if (pendingDeleteId == reminder.Id)
+                            {
+                                @DeleteConfirm(reminder)
+                            }
+                            else if (!FormOpen)
+                            {
+                                <div class="item-actions align-items-center">
+                                    <button type="button" class="btn btn-outline-primary btn-sm" @ref="doneButtons[reminder.Id]"
+                                            aria-label="@($"Mark done: {reminder.Text}")" @onclick="() => CompleteAsync(reminder)">Done</button>
+                                    @* Each button names its reminder, like Done/Edit/Delete, so it makes sense out of context
+                                       (a screen reader's list of buttons); the visible word stays in the name for voice control. *@
+                                    <span class="snooze-actions">
+                                        <span class="small text-body-secondary" aria-hidden="true">Snooze:</span>
+                                        <button type="button" class="btn btn-link btn-sm btn-quiet"
+                                                aria-label="@($"Snooze until tomorrow: {reminder.Text}")"
+                                                @onclick="() => SnoozeAsync(reminder, SnoozePeriod.Tomorrow)">Tomorrow</button>
+                                        <button type="button" class="btn btn-link btn-sm btn-quiet"
+                                                aria-label="@($"Snooze until next week: {reminder.Text}")"
+                                                @onclick="() => SnoozeAsync(reminder, SnoozePeriod.NextWeek)">Next week</button>
+                                    </span>
+                                    <button type="button" class="btn btn-link btn-sm btn-quiet" @ref="editButtons[reminder.Id]"
+                                            aria-label="@($"Edit: {reminder.Text}")" @onclick="() => StartEditAsync(reminder)">Edit</button>
+                                    <button type="button" class="btn btn-link btn-sm btn-quiet btn-quiet-danger" @ref="deleteButtons[reminder.Id]"
+                                            aria-label="@($"Delete: {reminder.Text}")" @onclick="() => RequestDelete(reminder)">Delete</button>
+                                </div>
+                            }
+                        }
+                    </li>
+                }
+            </ul>
+        }
+
+        @if (list.Done.Count > 0)
+        {
+            <h3 class="h6 mt-3">Recently done</h3>
+            <ul class="reminder-list">
+                @foreach (var reminder in list.Done)
+                {
+                    <li @key="reminder.Id" class="reminder-card is-done">
+                        <div class="reminder-text">@reminder.Text</div>
+                        <div class="reminder-meta">
+                            @if (reminder.CompletedAt is DateTime completed)
+                            {
+                                <span>Done <time datetime="@Iso(completed)">@LocalDate(completed)</time></span>
+                            }
+                            @AppLink(reminder)
+                        </div>
+                        @if (pendingDeleteId == reminder.Id)
+                        {
+                            @DeleteConfirm(reminder)
+                        }
+                        else if (!FormOpen)
+                        {
+                            <div class="item-actions">
+                                <button type="button" class="btn btn-link btn-sm btn-quiet"
+                                        aria-label="@($"Reopen: {reminder.Text}")" @onclick="() => ReopenAsync(reminder)">Reopen</button>
+                                <button type="button" class="btn btn-link btn-sm btn-quiet btn-quiet-danger" @ref="deleteButtons[reminder.Id]"
+                                        aria-label="@($"Delete: {reminder.Text}")" @onclick="() => RequestDelete(reminder)">Delete</button>
+                            </div>
+                        }
+                    </li>
+                }
+            </ul>
+        }
+
+        @if (ShowAllLink)
+        {
+            <p class="small text-body-secondary mt-3 mb-0">Upcoming and done reminders are on the <a href="reminders">Reminders page</a>.</p>
+        }
+    }
+</section>
+
+@code {
+    /// <summary>Only this application's reminders, and no application picker. Null for all.</summary>
+    [Parameter] public int? ApplicationId { get; set; }
+
+    /// <summary>Only open reminders that are overdue or due today (the Today page).</summary>
+    [Parameter] public bool DueOnly { get; set; }
+
+    [Parameter] public string Title { get; set; } = "Reminders";
+    [Parameter] public string HeadingClass { get; set; } = "h5";
+    [Parameter] public string SectionClass { get; set; } = "";
+
+    /// <summary>Keeps element ids unique on the page.</summary>
+    [Parameter] public string IdPrefix { get; set; } = "reminders";
+
+    /// <summary>Show a link to the Reminders page under the list.</summary>
+    [Parameter] public bool ShowAllLink { get; set; }
+
+    private ReminderList? list;
+    private bool loadFailed;
+    private int loadVersion;
+    private (int?, bool)? shownFor;
+    private string? notice;
+    private string? errorNotice;
+    private string announcement = "";
+
+    // True while an action (save + reload + reset) is running; see Exclusive.
+    private bool busy;
+
+    private IReadOnlyList<ApplicationChoice> choices = [];
+    private bool adding;
+    private ReminderInput newInput = new();
+    private int? editingId;
+    private ReminderInput? editInput;
+    private string? formError;
+    private int? pendingDeleteId;
+
+    private ElementReference heading;
+    private ElementReference addButton;
+    private ElementReference deleteCancelButton;
+    private ReminderForm? addForm;
+    private ReminderForm? editForm;
+    private readonly Dictionary<int, ElementReference> doneButtons = new();
+    private readonly Dictionary<int, ElementReference> editButtons = new();
+    private readonly Dictionary<int, ElementReference> deleteButtons = new();
+    private Func<Task>? focusAfterRender;
+
+    private string Id(string part) => $"{IdPrefix}-{part}";
+
+    /// <summary>
+    /// The add or edit form is open. Other actions are hidden meanwhile, so switching can't
+    /// silently throw away what was typed.
+    /// </summary>
+    private bool FormOpen => adding || editingId is not null;
+
+    private string EmptyText =>
+        DueOnly ? "No reminders due today."
+        : ApplicationId is not null ? "No open reminders for this application."
+        : "No open reminders.";
+
+    private string CountLabel(int count) =>
+        DueOnly ? (count == 1 ? "reminder due" : "reminders due")
+        : (count == 1 ? "open reminder" : "open reminders");
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (shownFor == (ApplicationId, DueOnly))
+        {
+            return;
+        }
+
+        // Another application (or mode): never show or act on the previous one's reminders.
+        shownFor = (ApplicationId, DueOnly);
+        list = null;
+        loadFailed = false;
+        notice = null;
+        errorNotice = null;
+        ResetEditing();
+        await LoadAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (focusAfterRender is { } focus)
+        {
+            focusAfterRender = null;
+            try
+            {
+                await focus();
+            }
+            catch (JSException)
+            {
+                // The element went away before it could be focused; nothing useful to do.
+            }
+        }
+    }
+
+    private void ResetEditing()
+    {
+        adding = false;
+        editingId = null;
+        editInput = null;
+        formError = null;
+        pendingDeleteId = null;
+    }
+
+    private async Task LoadAsync()
+    {
+        var version = ++loadVersion;
+        try
+        {
+            var loaded = await Reminders.ListAsync(new ReminderFilter { ApplicationId = ApplicationId, DueOnly = DueOnly });
+            if (version == loadVersion)
+            {
+                list = loaded;
+                loadFailed = false;
+            }
+        }
+        catch (Exception ex)
+        {
+            // Keep what is showing; an unhandled exception would end the whole circuit.
+            Logger.LogError(ex, "Loading reminders failed");
+            if (version == loadVersion)
+            {
+                loadFailed = list is null;
+                if (list is not null)
+                {
+                    errorNotice ??= "Couldn't load the latest reminders. Please reload the page.";
+                }
+            }
+        }
+    }
+
+    /// <summary>Runs a whole action handler on its own; a click that arrives meanwhile is ignored (see ApplicationDetail).</summary>
+    private async Task Exclusive(Func<Task> action)
+    {
+        if (busy)
+        {
+            return;
+        }
+
+        busy = true;
+        try
+        {
+            await action();
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    /// <summary>
+    /// Runs one write. A <see cref="ValidationException"/> becomes the form's error; anything else
+    /// is logged and shown, and the list reloads so it shows what is really stored.
+    /// </summary>
+    private async Task<bool> WriteAsync(Func<Task> write, string what, bool validates = false)
+    {
+        try
+        {
+            await write();
+            notice = null;
+            errorNotice = null;
+            return true;
+        }
+        catch (ApplicationNotFoundException ex) when (validates)
+        {
+            await HandleApplicationGoneAsync(ex.Message);
+            return false;
+        }
+        catch (ValidationException ex) when (validates)
+        {
+            formError = ex.Message;
+            return false;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "{What} failed", what);
+            errorNotice = $"Couldn't {what.ToLowerInvariant()}. Please try again.";
+            await LoadAsync();
+            return false;
+        }
+    }
+
+    private async Task HandleGoneAsync()
+    {
+        errorNotice = "That reminder no longer exists. It may have been deleted elsewhere.";
+        await LoadAsync();
+        focusAfterRender = () => heading.FocusAsync().AsTask();
+    }
+
+    /// <summary>
+    /// The application chosen in the form was deleted elsewhere. With a picker, refresh it and clear
+    /// the choice so the user can pick again; tied to one application there is nothing to pick, so
+    /// close the form and say so.
+    /// </summary>
+    private async Task HandleApplicationGoneAsync(string message)
+    {
+        if (ApplicationId is not null)
+        {
+            ResetEditing();
+            errorNotice = "This application no longer exists. It may have been deleted elsewhere.";
+            focusAfterRender = () => heading.FocusAsync().AsTask();
+            return;
+        }
+
+        formError = message;
+        if (await LoadChoicesAsync())
+        {
+            var input = adding ? newInput : editInput;
+            if (input?.ApplicationId is int chosen && choices.All(c => c.Id != chosen))
+            {
+                input.ApplicationId = null;
+            }
+        }
+    }
+
+    // ---------- Add ----------
+
+    private Task StartAddAsync() => Exclusive(StartAddCoreAsync);
+
+    private async Task StartAddCoreAsync()
+    {
+        var shownAtStart = shownFor;
+        editingId = null;
+        editInput = null;
+        pendingDeleteId = null;
+        formError = null;
+        if (!await LoadChoicesAsync() || shownFor != shownAtStart)
+        {
+            return;
+        }
+
+        newInput = new ReminderInput
+        {
+            DueOn = SnoozePeriod.Tomorrow.DueFrom(Reminders.Today),
+            ApplicationId = ApplicationId,
+        };
+        adding = true;
+        focusAfterRender = () => addForm?.FocusAsync() ?? Task.CompletedTask;
+    }
+
+    private void CancelAdd()
+    {
+        adding = false;
+        formError = null;
+        focusAfterRender = () => addButton.FocusAsync().AsTask();
+    }
+
+    private Task AddAsync() => Exclusive(AddCoreAsync);
+
+    private async Task AddCoreAsync()
+    {
+        if (!adding)
+        {
+            return; // a late second click: the form already closed
+        }
+
+        formError = null;
+        if (!await WriteAsync(() => Reminders.AddAsync(newInput), "Add the reminder", validates: true))
+        {
+            return;
+        }
+
+        adding = false;
+        await LoadAsync();
+        var due = newInput.DueOn!.Value;
+        if (DueOnly && due > Reminders.Today)
+        {
+            // It won't appear in this list yet, so say where it went.
+            notice = $"Reminder added for {DueText(due)}. It will show here when it's due.";
+        }
+        Announce($"Reminder added, due {DueText(due)}.");
+        focusAfterRender = () => addButton.FocusAsync().AsTask();
+    }
+
+    // ---------- Edit ----------
+
+    private Task StartEditAsync(ReminderView reminder) => Exclusive(() => StartEditCoreAsync(reminder));
+
+    private async Task StartEditCoreAsync(ReminderView reminder)
+    {
+        adding = false;
+        pendingDeleteId = null;
+        formError = null;
+        var shownAtStart = shownFor;
+        ReminderInput? input = null;
+        if (!await LoadChoicesAsync() || !await WriteAsync(async () => input = await Reminders.GetForEditAsync(reminder.Id), "Open the reminder")
+            || shownFor != shownAtStart)
+        {
+            return;
+        }
+
+        if (input is null)
+        {
+            await HandleGoneAsync();
+            return;
+        }
+
+        editInput = input;
+        editingId = reminder.Id;
+        focusAfterRender = () => editForm?.FocusAsync() ?? Task.CompletedTask;
+    }
+
+    private void CancelEdit(ReminderView reminder)
+    {
+        editingId = null;
+        editInput = null;
+        formError = null;
+        focusAfterRender = () => FocusIfPresent(editButtons, reminder.Id);
+    }
+
+    private Task SaveAsync(ReminderView reminder) => Exclusive(() => SaveCoreAsync(reminder));
+
+    private async Task SaveCoreAsync(ReminderView reminder)
+    {
+        if (editingId != reminder.Id || editInput is null)
+        {
+            return; // a late second click: the form already closed
+        }
+
+        formError = null;
+        var found = false;
+        if (!await WriteAsync(async () => found = await Reminders.UpdateAsync(reminder.Id, editInput!), "Save the reminder", validates: true))
+        {
+            return;
+        }
+
+        editingId = null;
+        editInput = null;
+        if (!found)
+        {
+            await HandleGoneAsync();
+            return;
+        }
+
+        await LoadAsync();
+        Announce("Reminder saved.");
+        focusAfterRender = () => FocusIfPresent(editButtons, reminder.Id);
+    }
+
+    // ---------- Done, snooze, reopen ----------
+
+    private Task CompleteAsync(ReminderView reminder) => Exclusive(() => CompleteCoreAsync(reminder));
+
+    private async Task CompleteCoreAsync(ReminderView reminder)
+    {
+        var index = IndexInOpen(reminder.Id);
+        var found = false;
+        if (!await WriteAsync(async () => found = await Reminders.CompleteAsync(reminder.Id), "Mark the reminder done"))
+        {
+            return;
+        }
+        if (!found)
+        {
+            await HandleGoneAsync();
+            return;
+        }
+
+        await LoadAsync();
+        Announce("Reminder done.");
+        focusAfterRender = () => FocusInList(reminder.Id, index);
+    }
+
+    private Task SnoozeAsync(ReminderView reminder, SnoozePeriod period) => Exclusive(() => SnoozeCoreAsync(reminder, period));
+
+    private async Task SnoozeCoreAsync(ReminderView reminder, SnoozePeriod period)
+    {
+        var index = IndexInOpen(reminder.Id);
+        DateOnly? due = null;
+        if (!await WriteAsync(async () => due = await Reminders.SnoozeAsync(reminder.Id, period), "Snooze the reminder"))
+        {
+            return;
+        }
+        if (due is not DateOnly newDate)
+        {
+            await HandleGoneAsync();
+            return;
+        }
+
+        await LoadAsync();
+        Announce($"Reminder snoozed until {DueText(newDate)}.");
+        focusAfterRender = () => FocusInList(reminder.Id, index);
+    }
+
+    private Task ReopenAsync(ReminderView reminder) => Exclusive(() => ReopenCoreAsync(reminder));
+
+    private async Task ReopenCoreAsync(ReminderView reminder)
+    {
+        var found = false;
+        if (!await WriteAsync(async () => found = await Reminders.ReopenAsync(reminder.Id), "Reopen the reminder"))
+        {
+            return;
+        }
+        if (!found)
+        {
+            await HandleGoneAsync();
+            return;
+        }
+
+        await LoadAsync();
+        Announce("Reminder reopened.");
+        focusAfterRender = () => FocusIfPresent(doneButtons, reminder.Id);
+    }
+
+    // ---------- Delete ----------
+
+    private void RequestDelete(ReminderView reminder)
+    {
+        if (busy || FormOpen)
+        {
+            return; // an action is running, or a form is open with changes that would be lost
+        }
+
+        adding = false;
+        editingId = null;
+        editInput = null;
+        pendingDeleteId = reminder.Id;
+        focusAfterRender = () => deleteCancelButton.FocusAsync().AsTask();
+    }
+
+    private void CancelDelete(ReminderView reminder)
+    {
+        pendingDeleteId = null;
+        // Back to the Delete button that opened the confirmation, so a long list keeps its place.
+        focusAfterRender = () => FocusIfPresent(deleteButtons, reminder.Id);
+    }
+
+    private void OnConfirmKeyDown(KeyboardEventArgs e, ReminderView reminder)
+    {
+        if (e.Key == "Escape")
+        {
+            CancelDelete(reminder);
+        }
+    }
+
+    private Task DeleteAsync(ReminderView reminder) => Exclusive(() => DeleteCoreAsync(reminder));
+
+    private async Task DeleteCoreAsync(ReminderView reminder)
+    {
+        if (pendingDeleteId != reminder.Id)
+        {
+            return; // a late second click: the confirmation already closed
+        }
+
+        pendingDeleteId = null;
+        if (!await WriteAsync(() => Reminders.DeleteAsync(reminder.Id), "Delete the reminder"))
+        {
+            return;
+        }
+
+        doneButtons.Remove(reminder.Id);
+        editButtons.Remove(reminder.Id);
+        deleteButtons.Remove(reminder.Id);
+        await LoadAsync();
+        Announce("Reminder deleted.");
+        focusAfterRender = () => heading.FocusAsync().AsTask();
+    }
+
+    private RenderFragment DeleteConfirm(ReminderView reminder) =>
+        @<div class="d-flex flex-wrap align-items-center gap-2 mt-2" role="group"
+              aria-labelledby="@Id($"delete-{reminder.Id}")" @onkeydown="e => OnConfirmKeyDown(e, reminder)">
+            <span id="@Id($"delete-{reminder.Id}")">Delete this reminder permanently?</span>
+            <button type="button" class="btn btn-danger btn-sm" @onclick="() => DeleteAsync(reminder)">Delete</button>
+            <button type="button" class="btn btn-outline-secondary btn-sm" @ref="deleteCancelButton" @onclick="() => CancelDelete(reminder)">Cancel</button>
+        </div>;
+
+    // ---------- Helpers ----------
+
+    /// <summary>The application picker's options, fresh each time a form opens.</summary>
+    private async Task<bool> LoadChoicesAsync()
+    {
+        if (ApplicationId is not null)
+        {
+            return true;
+        }
+
+        IReadOnlyList<ApplicationChoice> loaded = [];
+        if (!await WriteAsync(async () => loaded = await Reminders.GetApplicationChoicesAsync(), "Open the reminder form"))
+        {
+            return false;
+        }
+
+        choices = loaded;
+        return true;
+    }
+
+    private RenderFragment? AppLink(ReminderView reminder) =>
+        ApplicationId is null && reminder.Application is { } app
+            ? @<span>For <a href="applications/@app.Id">@app.RoleTitle at @app.CompanyName</a></span>
+            : null;
+
+    /// <summary>
+    /// Sets the live region text. The same text twice in a row would be silent (nothing changed),
+    /// so a trailing no-break space is toggled to make it change.
+    /// </summary>
+    private void Announce(string text) =>
+        announcement = announcement == text ? text + " " : text;
+
+    /// <summary>
+    /// Focuses the element for <paramref name="id"/> if that reminder is still shown with its buttons
+    /// (open, or in "Recently done" for the Delete button), otherwise the heading.
+    /// </summary>
+    private Task FocusIfPresent(Dictionary<int, ElementReference> refs, int id)
+    {
+        // A dictionary entry outlives its element, so ask the data whether the item is still shown.
+        var inList = list is not null
+            && (list.Open.Any(r => r.Id == id) || (refs == deleteButtons && list.Done.Any(r => r.Id == id)));
+        var shown = inList && editingId != id && pendingDeleteId != id;
+        return (shown && refs.TryGetValue(id, out var element) ? element : heading).FocusAsync().AsTask();
+    }
+
+    private int IndexInOpen(int id) => list?.Open.ToList().FindIndex(r => r.Id == id) ?? -1;
+
+    /// <summary>
+    /// After an action on an open reminder: its own Done button if it is still in the list (e.g.
+    /// snoozed on the Reminders page), otherwise the reminder that moved up into its place, so the
+    /// user keeps their place; the heading when the list is empty.
+    /// </summary>
+    private Task FocusInList(int id, int index)
+    {
+        if (list is { Open.Count: > 0 } current)
+        {
+            if (current.Open.Any(r => r.Id == id))
+            {
+                return FocusIfPresent(doneButtons, id);
+            }
+            if (index >= 0)
+            {
+                return FocusIfPresent(doneButtons, current.Open[Math.Min(index, current.Open.Count - 1)].Id);
+            }
+        }
+        return heading.FocusAsync().AsTask();
+    }
+
+    private string DueText(DateOnly date)
+    {
+        var today = Reminders.Today;
+        return date == today ? "today"
+             : date == today.AddDays(1) ? "tomorrow"
+             : date == today.AddDays(-1) ? "yesterday"
+             : date.ToString("d MMM yyyy");
+    }
+
+    private string LocalDate(DateTime utc) =>
+        TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(utc, DateTimeKind.Utc), Time.LocalTimeZone)
+            .ToString("d MMM yyyy");
+
+    // HTML allows at most 3 fractional digits in <time datetime>, so whole seconds.
+    private static string Iso(DateTime utc) => DateTime.SpecifyKind(utc, DateTimeKind.Utc).ToString("yyyy-MM-ddTHH:mm:ssZ");
+
+    private static string? StateClass(FollowUpState state) => state switch
+    {
+        FollowUpState.Overdue => "is-overdue",
+        FollowUpState.DueToday => "is-due-today",
+        _ => null,
+    };
+
+    private static string? DateClass(FollowUpState state) => state switch
+    {
+        FollowUpState.Overdue => "followup-date-overdue",
+        FollowUpState.DueToday => "followup-date-due-today",
+        _ => null,
+    };
+}

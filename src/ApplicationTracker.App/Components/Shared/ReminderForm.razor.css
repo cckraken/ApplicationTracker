@@ -1,0 +1,10 @@
+/* As many columns as the container (not the viewport) has room for; the text field gets a full row. */
+.reminder-form-fields {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
+    gap: 0.5rem 0.75rem;
+}
+
+.reminder-form-text {
+    grid-column: 1 / -1;
+}

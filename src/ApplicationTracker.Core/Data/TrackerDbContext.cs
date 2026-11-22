@@ -91,7 +91,7 @@ public class TrackerDbContext : DbContext
 
         modelBuilder.Entity<Reminder>(e =>
         {
-            e.Property(r => r.Text).HasMaxLength(500);
+            e.Property(r => r.Text).HasMaxLength(Reminder.MaxTextLength);
             e.HasIndex(r => new { r.IsDone, r.DueOn });
         });
     }

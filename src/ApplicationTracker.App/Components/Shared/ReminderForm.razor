@@ -1,0 +1,124 @@
+@* Inline add/edit form for a reminder. The owner saves; this only collects and validates input.
+   IdPrefix keeps ids unique when several forms could be on one page. *@
+<EditForm Model="Model" OnValidSubmit="OnValidSubmit" OnInvalidSubmit="OnInvalid" class="reminder-form" novalidate>
+    <DataAnnotationsValidator />
+
+    @if (!string.IsNullOrEmpty(Error))
+    {
+        <div class="alert alert-danger py-2" role="alert">@Error</div>
+    }
+
+    <div class="reminder-form-fields">
+        <div class="reminder-form-text">
+            <label for="@Id("text")" class="form-label">What to do <span class="required-mark" aria-hidden="true">*</span></label>
+            <InputText id="@Id("text")" class="form-control" @bind-Value="Model.Text" @ref="textInput"
+                       maxlength="@Reminder.MaxTextLength" autocomplete="off" aria-required="true"
+                       aria-describedby="@Id("text-error")" placeholder="e.g. Email Sam about the take-home task"
+                       @onkeydown="OnKeyDown" />
+            <div id="@Id("text-error")"><ValidationMessage For="() => Model.Text" /></div>
+        </div>
+        <div>
+            <label for="@Id("due")" class="form-label">Due on <span class="required-mark" aria-hidden="true">*</span></label>
+            <InputDate id="@Id("due")" class="form-control" @bind-Value="Model.DueOn" @ref="dueInput"
+                       aria-required="true" aria-describedby="@Id("due-error")" @onkeydown="OnKeyDown" />
+            <div id="@Id("due-error")"><ValidationMessage For="() => Model.DueOn" /></div>
+        </div>
+        @if (ShowApplicationPicker)
+        {
+            <div>
+                <label for="@Id("application")" class="form-label">Application</label>
+                <InputSelect id="@Id("application")" class="form-select" @bind-Value="Model.ApplicationId" @onkeydown="OnKeyDown">
+                    <option value="">None</option>
+                    @if (Applications.Any(a => !a.IsClosed))
+                    {
+                        <optgroup label="Active">
+                            @foreach (var app in Applications.Where(a => !a.IsClosed))
+                            {
+                                <option value="@app.Id">@Label(app)</option>
+                            }
+                        </optgroup>
+                    }
+                    @if (Applications.Any(a => a.IsClosed))
+                    {
+                        <optgroup label="Closed">
+                            @foreach (var app in Applications.Where(a => a.IsClosed))
+                            {
+                                <option value="@app.Id">@Label(app)</option>
+                            }
+                        </optgroup>
+                    }
+                </InputSelect>
+            </div>
+        }
+    </div>
+
+    <div class="d-flex flex-wrap gap-2 mt-2">
+        <button type="submit" class="btn btn-primary btn-sm" disabled="@Busy">@SubmitLabel</button>
+        <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="OnCancel">Cancel</button>
+    </div>
+</EditForm>
+
+@code {
+    [Parameter, EditorRequired] public ReminderInput Model { get; set; } = default!;
+    [Parameter, EditorRequired] public string IdPrefix { get; set; } = "";
+    [Parameter] public bool ShowApplicationPicker { get; set; }
+    [Parameter] public IReadOnlyList<ApplicationChoice> Applications { get; set; } = [];
+    [Parameter] public string SubmitLabel { get; set; } = "Save";
+    [Parameter] public bool Busy { get; set; }
+    [Parameter] public string? Error { get; set; }
+    [Parameter] public EventCallback OnValidSubmit { get; set; }
+    [Parameter] public EventCallback OnCancel { get; set; }
+
+    private InputText? textInput;
+    private InputDate<DateOnly?>? dueInput;
+    private EditContext? invalidContext;
+
+    private string Id(string field) => $"{IdPrefix}-{field}";
+
+    private static string Label(ApplicationChoice app) => $"{app.RoleTitle} at {app.CompanyName}";
+
+    /// <summary>Puts focus in the text field, e.g. right after the form opens.</summary>
+    public async Task FocusAsync()
+    {
+        if (textInput?.Element is { } element)
+        {
+            await element.FocusAsync();
+        }
+    }
+
+    private async Task OnKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape")
+        {
+            await OnCancel.InvokeAsync();
+        }
+    }
+
+    // Focus the first invalid field after render, once its message is in the page (see ContactForm).
+    private void OnInvalid(EditContext context) => invalidContext = context;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (invalidContext is not { } context)
+        {
+            return;
+        }
+        invalidContext = null;
+
+        var element =
+            context.GetValidationMessages(new FieldIdentifier(Model, nameof(ReminderInput.Text))).Any() ? textInput?.Element
+            : context.GetValidationMessages(new FieldIdentifier(Model, nameof(ReminderInput.DueOn))).Any() ? dueInput?.Element
+            : null;
+        if (element is { } target)
+        {
+            try
+            {
+                await target.FocusAsync();
+            }
+            catch (JSException)
+            {
+                // The form closed before focus could move; nothing useful to do.
+            }
+        }
+    }
+}

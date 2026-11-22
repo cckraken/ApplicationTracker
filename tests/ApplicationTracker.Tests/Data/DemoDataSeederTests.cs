@@ -82,4 +82,70 @@ public sealed class DemoDataSeederTests : IDisposable
         Assert.All(notes.Where(n => n.UpdatedAt is not null), n => Assert.True(n.UpdatedAt > n.CreatedAt));
         Assert.All(notes, n => Assert.True(n.CreatedAt <= utcNow && (n.UpdatedAt ?? n.CreatedAt) <= utcNow));
     }
+
+    [Fact]
+    public async Task Seeds_one_reminder_in_each_state()
+    {
+        using (var db = _db.CreateDbContext())
+        {
+            await DemoDataSeeder.SeedIfEmptyAsync(db, _time);
+        }
+
+        using var check = _db.CreateDbContext();
+        var today = new DateOnly(2026, 11, 21);
+        var reminders = await check.Reminders.Include(r => r.JobApplication!).ThenInclude(a => a.Company).ToListAsync();
+        Assert.Equal(4, reminders.Count);
+
+        var overdue = Assert.Single(reminders, r => !r.IsDone && r.DueOn < today);
+        Assert.Null(overdue.JobApplicationId);
+
+        var dueToday = Assert.Single(reminders, r => !r.IsDone && r.DueOn == today);
+        Assert.Equal("Adventure Works", dueToday.JobApplication?.Company.Name);
+
+        var upcoming = Assert.Single(reminders, r => !r.IsDone && r.DueOn > today);
+        Assert.Equal("Proseware", upcoming.JobApplication?.Company.Name);
+
+        var done = Assert.Single(reminders, r => r.IsDone);
+        Assert.Null(done.JobApplicationId);
+        Assert.NotNull(done.CompletedAt);
+    }
+
+    [Fact]
+    public async Task Seeded_reminders_have_consistent_utc_timestamps()
+    {
+        using (var db = _db.CreateDbContext())
+        {
+            await DemoDataSeeder.SeedIfEmptyAsync(db, _time);
+        }
+
+        using var check = _db.CreateDbContext();
+        var utcNow = _time.GetUtcNow().UtcDateTime;
+        var reminders = await check.Reminders.ToListAsync();
+        Assert.All(reminders, r =>
+        {
+            Assert.Equal(DateTimeKind.Utc, r.CreatedAt.Kind);
+            Assert.True(r.CreatedAt <= utcNow);
+            Assert.Equal(r.IsDone, r.CompletedAt is not null);
+            if (r.CompletedAt is DateTime completed)
+            {
+                Assert.True(completed > r.CreatedAt && completed <= utcNow);
+            }
+        });
+    }
+
+    [Fact]
+    public async Task Seeded_reminder_dates_follow_the_local_date_late_in_the_evening()
+    {
+        // 23:30 UTC on the 21st is already the 22nd in UTC+1.
+        var time = new FakeTimeProvider(new DateTimeOffset(2026, 11, 21, 23, 30, 0, TimeSpan.Zero));
+        time.SetLocalTimeZone(TimeZoneInfo.CreateCustomTimeZone("Test+01", TimeSpan.FromHours(1), "Test +1", "Test +1"));
+        using (var db = _db.CreateDbContext())
+        {
+            await DemoDataSeeder.SeedIfEmptyAsync(db, time);
+        }
+
+        using var check = _db.CreateDbContext();
+        var dueToday = await check.Reminders.SingleAsync(r => r.JobApplication!.Company.Name == "Adventure Works");
+        Assert.Equal(new DateOnly(2026, 11, 22), dueToday.DueOn);
+    }
 }
