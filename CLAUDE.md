@@ -66,4 +66,4 @@ dotnet ef database update --project src/ApplicationTracker.Core --startup-projec
 
 ## Subagents
 
-In `.claude/agents/`; each one's `description` says when to use it. They load this file and `.claude/rules/` automatically.
+In `.claude/agents/`; each one's `description` says when to use it. They load this file and `.claude/rules/` by default, unless their frontmatter sets `omitClaudeMd: true`.

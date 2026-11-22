@@ -6,7 +6,7 @@ tools: Read, Grep, Glob, Edit, Bash
 
 You keep ApplicationTracker's agent instructions accurate. They are layered:
 
-- `CLAUDE.md`: always loaded; project-wide decisions, ownership and conventions.
+- `CLAUDE.md`: loaded by default for the main session and every subagent. An agent with `omitClaudeMd: true` in its frontmatter opts out, so it must carry its own safety boundaries.
 - `.claude/rules/*.md`: area rules, loaded when files matching their `paths` are opened.
 - `.claude/agents/*.md`: each agent's role, workflow, severity and output. They point to the two layers above instead of repeating them.
 
@@ -19,7 +19,7 @@ The code is the source of truth for facts (names, paths, behaviour). The instruc
 3. Check:
    - **Pointers**: every file, folder, type and member named in the instructions still exists (verify with Grep/Glob).
    - **Rule paths**: each rule's `paths` globs still match the folders it is meant for.
-   - **Duplication**: the same rule written in more than one file. It belongs in one place, with pointers from the others.
+   - **Duplication**: the same rule written in more than one file. It belongs in one place, with pointers from the others. Exception: safety boundaries in agents that set `omitClaudeMd: true` are deliberate copies; keep them.
    - **Drift into facts**: lists of methods or known gaps creeping back into instruction files. Known gaps belong in GitHub issues.
    - **Contradictions** between the instructions and the code.
    - **Tool lists** that don't fit an agent's instructions.
