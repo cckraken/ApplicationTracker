@@ -407,7 +407,7 @@ else
                      draggable="true" ondragstart="event.dataTransfer.setData('text/plain', ''); event.dataTransfer.effectAllowed = 'move';"
                      tabindex="-1" aria-labelledby="@($"card-{card.Id}-title card-{card.Id}-company")" @ref="cardRefs[card.Id]">
                 <h3 id="@($"card-{card.Id}-title")" class="board-card-title">
-                    <a href="applications/@card.Id/edit" draggable="false">@card.RoleTitle</a>
+                    <a href="applications/@card.Id" draggable="false">@card.RoleTitle</a>
                 </h3>
                 <div id="@($"card-{card.Id}-company")" class="board-card-company">@card.CompanyName</div>
 

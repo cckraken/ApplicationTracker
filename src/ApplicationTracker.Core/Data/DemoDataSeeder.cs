@@ -75,10 +75,55 @@ public static class DemoDataSeeder
                 app.Notes.Add(new Note { Body = "Prepared answers for the competency questions.", CreatedAt = utcNow.AddDays(-2) });
             }
 
+            if (demo.Status is ApplicationStatus.Screening or ApplicationStatus.Interview or ApplicationStatus.Offer)
+            {
+                app.Notes.Add(new Note
+                {
+                    Body = "Phone screen with the recruiter.\nAsked about notice period and salary expectations.",
+                    CreatedAt = utcNow.AddDays(-5),
+                    UpdatedAt = utcNow.AddDays(-4),
+                });
+                AddContacts(app, demo);
+            }
+
             db.Applications.Add(app);
         }
 
+        // One contact not linked to any application yet, as found on the Contacts page.
+        db.Contacts.Add(new Contact { Name = "Robin Hale", Role = "Agency recruiter", Email = "robin.hale@example.com" });
+
         await db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>Fictional people for the later-stage demo applications.</summary>
+    private static void AddContacts(JobApplication app, Demo demo)
+    {
+        var domain = $"{demo.Company.ToLowerInvariant().Replace(' ', '-')}.example.com";
+        var people = new List<Contact>
+        {
+            new()
+            {
+                Name = $"Sam {demo.Company.Split(' ')[0]}",
+                Role = "Recruiter",
+                Email = $"sam@{domain}",
+                Phone = "+44 20 7946 0000",
+                Company = app.Company,
+            },
+        };
+
+        if (demo.Status is ApplicationStatus.Interview or ApplicationStatus.Offer)
+        {
+            people.Add(new Contact
+            {
+                Name = "Jordan Lee",
+                Role = "Hiring manager",
+                LinkedInUrl = "https://www.linkedin.com/in/example",
+                Company = app.Company,
+            });
+        }
+
+        // One side of the many-to-many is enough; EF fills in the other.
+        app.Contacts.AddRange(people);
     }
 
     private static IEnumerable<ApplicationStatus> PathTo(ApplicationStatus target) => target switch

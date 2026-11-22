@@ -50,8 +50,8 @@ else
         {
             if (await Applications.UpdateAsync(Id, model!))
             {
-                // The list shows a "Saved ..." confirmation for this id.
-                Navigation.NavigateTo($"applications?saved={Id}");
+                // The detail page shows a "Saved." confirmation.
+                Navigation.NavigateTo($"applications/{Id}?saved=true");
             }
             else
             {
@@ -68,5 +68,5 @@ else
         }
     }
 
-    private void Cancel() => Navigation.NavigateTo("applications");
+    private void Cancel() => Navigation.NavigateTo($"applications/{Id}");
 }

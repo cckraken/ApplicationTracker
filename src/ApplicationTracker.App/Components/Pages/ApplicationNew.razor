@@ -26,8 +26,8 @@
         try
         {
             var id = await Applications.CreateAsync(model);
-            // The list shows a "Saved ..." confirmation for this id.
-            Navigation.NavigateTo($"applications?saved={id}");
+            // The detail page shows a "Saved." confirmation.
+            Navigation.NavigateTo($"applications/{id}?saved=true");
         }
         catch (ValidationException ex)
         {

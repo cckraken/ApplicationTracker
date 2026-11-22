@@ -1,6 +1,8 @@
 using ApplicationTracker.App.Components;
 using ApplicationTracker.Core.Applications;
+using ApplicationTracker.Core.Contacts;
 using ApplicationTracker.Core.Data;
+using ApplicationTracker.Core.Notes;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -27,6 +29,8 @@ builder.Services.AddDbContextFactory<TrackerDbContext>(options =>
     options.UseSqlite($"Data Source={databasePath}"));
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<ApplicationService>();
+builder.Services.AddScoped<NoteService>();
+builder.Services.AddScoped<ContactService>();
 
 var app = builder.Build();
 

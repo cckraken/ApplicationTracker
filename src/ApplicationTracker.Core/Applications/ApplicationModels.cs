@@ -1,5 +1,7 @@
 using System.ComponentModel.DataAnnotations;
+using ApplicationTracker.Core.Contacts;
 using ApplicationTracker.Core.Domain;
+using ApplicationTracker.Core.Notes;
 
 namespace ApplicationTracker.Core.Applications;
 
@@ -65,6 +67,28 @@ public sealed record ApplicationSummary(
     DateOnly? AppliedOn,
     DateOnly? FollowUpOn,
     FollowUpState FollowUpState);
+
+/// <summary>One application as shown on its detail page. Timestamps are UTC.</summary>
+/// <param name="DaysInStage">Whole local days since the application entered its current status.</param>
+/// <param name="Notes">Newest first.</param>
+/// <param name="Contacts">Linked contacts, by name.</param>
+public sealed record ApplicationDetails(
+    int Id,
+    string RoleTitle,
+    string CompanyName,
+    ApplicationStatus Status,
+    string? PostingUrl,
+    string? Location,
+    string? SalaryRange,
+    string? Source,
+    DateOnly? AppliedOn,
+    DateOnly? FollowUpOn,
+    FollowUpState FollowUpState,
+    int DaysInStage,
+    DateTime CreatedAt,
+    DateTime UpdatedAt,
+    IReadOnlyList<NoteView> Notes,
+    IReadOnlyList<ContactSummary> Contacts);
 
 public enum PipelineDirection
 {

@@ -1,0 +1,422 @@
+@page "/contacts"
+@using System.ComponentModel.DataAnnotations
+@inject ContactService Contacts
+@inject ApplicationService Applications
+@inject ILogger<ContactList> Logger
+
+<PageTitle>Contacts · Application Tracker</PageTitle>
+
+<div class="detail-header mb-3">
+    <h1 class="mb-0">Contacts</h1>
+    @if (!adding)
+    {
+        <button type="button" class="btn btn-primary" @ref="addButton" @onclick="StartAdd">Add contact</button>
+    }
+</div>
+
+@if (errorNotice is not null)
+{
+    <div class="alert alert-danger alert-dismissible" role="alert">
+        @errorNotice
+        <button type="button" class="btn-close" aria-label="Dismiss error" @onclick="() => errorNotice = null"></button>
+    </div>
+}
+
+<p class="visually-hidden" role="status" aria-live="polite">@announcement</p>
+
+@if (adding)
+{
+    <section class="contact-card mb-3" aria-labelledby="new-contact-heading">
+        <h2 id="new-contact-heading" class="h6">New contact</h2>
+        <ContactForm @ref="addForm" IdPrefix="contact-new" Model="newContact" CompanyNames="companyNames"
+                     SubmitLabel="Add contact" Busy="busy" Error="@formError"
+                     OnValidSubmit="AddAsync" OnCancel="CancelAdd" />
+    </section>
+}
+
+<div class="row g-2 align-items-end mb-3" role="search" aria-label="Filter contacts">
+    <div class="col-sm-6 col-lg-5">
+        <label for="contact-search" class="form-label">Search</label>
+        <input id="contact-search" type="search" class="form-control" placeholder="Name, role, email or company"
+               @ref="searchInput" @bind="search" @bind:event="oninput" @bind:after="LoadAsync" />
+    </div>
+</div>
+
+@if (items is null)
+{
+    <p>Loading…</p>
+}
+else if (items.Count == 0)
+{
+    <div class="empty-state">
+        @if (!string.IsNullOrWhiteSpace(search))
+        {
+            <h2 class="h5">No contacts match “@search.Trim()”</h2>
+            <p>Try a different name, role, email or company.</p>
+            <button type="button" class="btn btn-outline-primary" @onclick="ClearSearchAsync">Clear search</button>
+        }
+        else
+        {
+            <h2 class="h5">No contacts yet</h2>
+            <p>Add recruiters, hiring managers and interviewers here, or from an application's page so they are linked to it.</p>
+            @if (!adding)
+            {
+                <button type="button" class="btn btn-primary" @onclick="StartAdd">Add your first contact</button>
+            }
+        }
+    </div>
+}
+else
+{
+    <p id="contacts-summary" class="results-summary" tabindex="-1" @ref="summary">
+        @items.Count @(items.Count == 1 ? "contact" : "contacts")
+    </p>
+
+    <ul class="contact-cards contact-cards-grid" aria-labelledby="contacts-summary">
+        @foreach (var item in items)
+        {
+            var contact = item.Contact;
+            <li @key="contact.Id" class="contact-card @(editingId == contact.Id ? "is-editing" : null)">
+                @if (editingId == contact.Id && editModel is not null)
+                {
+                    <h2 class="h6">Edit @contact.Name</h2>
+                    <ContactForm @ref="editForm" IdPrefix="@($"contact-edit-{contact.Id}")" Model="editModel"
+                                 CompanyNames="companyNames" SubmitLabel="Save contact" Busy="busy" Error="@formError"
+                                 OnValidSubmit="() => SaveAsync(contact)" OnCancel="() => CancelEdit(contact)" />
+                }
+                else
+                {
+                    <ContactDetails Contact="contact" HeadingLevel="2" />
+
+                    <div class="contact-apps">
+                        @if (item.Applications.Count == 0)
+                        {
+                            <span class="text-body-secondary">Not linked to any application.</span>
+                        }
+                        else
+                        {
+                            <span class="visually-hidden">Linked applications:</span>
+                            <ul class="list-unstyled mb-0">
+                                @foreach (var app in item.Applications)
+                                {
+                                    <li class="d-flex flex-wrap align-items-center gap-1">
+                                        <a href="applications/@app.Id">@app.RoleTitle at @app.CompanyName</a>
+                                        <StatusBadge Status="app.Status" />
+                                    </li>
+                                }
+                            </ul>
+                        }
+                    </div>
+
+                    @if (pendingDeleteId == contact.Id)
+                    {
+                        <div class="d-flex flex-wrap align-items-center gap-2 mt-2" role="group"
+                             aria-labelledby="@($"contact-delete-{contact.Id}")" @onkeydown="e => OnConfirmKeyDown(e, contact)">
+                            <span id="@($"contact-delete-{contact.Id}")">
+                                Delete @contact.Name permanently?@(item.Applications.Count > 0 ? " Their applications are kept." : "")
+                            </span>
+                            <button type="button" class="btn btn-danger btn-sm" @onclick="() => DeleteAsync(contact)">Delete</button>
+                            <button type="button" class="btn btn-outline-secondary btn-sm" @ref="deleteCancelButton"
+                                    @onclick="() => CancelDelete(contact)">Cancel</button>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="item-actions">
+                            <button type="button" class="btn btn-link btn-sm btn-quiet" @ref="editButtons[contact.Id]"
+                                    aria-label="@($"Edit {contact.Name}")" @onclick="() => StartEditAsync(contact)">Edit</button>
+                            <button type="button" class="btn btn-link btn-sm btn-quiet btn-quiet-danger" @ref="deleteButtons[contact.Id]"
+                                    aria-label="@($"Delete {contact.Name}")" @onclick="() => RequestDelete(contact)">Delete</button>
+                        </div>
+                    }
+                }
+            </li>
+        }
+    </ul>
+}
+
+@code {
+    private IReadOnlyList<ContactListItem>? items;
+    private IReadOnlyList<string> companyNames = [];
+    private string search = "";
+    private string announcement = "";
+    private string? errorNotice;
+    private string? formError;
+    private int loadVersion;
+
+    // True while an action (save + reload + reset) is running; see Exclusive.
+    private bool busy;
+
+    private bool adding;
+    private ContactInput newContact = new();
+    private int? editingId;
+    private ContactInput? editModel;
+    private int? pendingDeleteId;
+
+    private ContactForm? addForm;
+    private ContactForm? editForm;
+    private ElementReference addButton;
+    private ElementReference searchInput;
+    private ElementReference summary;
+    private ElementReference deleteCancelButton;
+    private readonly Dictionary<int, ElementReference> editButtons = new();
+    private readonly Dictionary<int, ElementReference> deleteButtons = new();
+    private Func<Task>? focusAfterRender;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (focusAfterRender is { } focus)
+        {
+            focusAfterRender = null;
+            try
+            {
+                await focus();
+            }
+            catch (JSException)
+            {
+                // The element went away before it could be focused; nothing useful to do.
+            }
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        // Typing in the search box can start several loads; only the newest one wins.
+        var version = ++loadVersion;
+        try
+        {
+            var result = await Contacts.SearchAsync(search);
+            var companies = await Applications.GetCompanyNamesAsync();
+            if (version == loadVersion)
+            {
+                items = result;
+                companyNames = companies;
+            }
+        }
+        catch (Exception ex)
+        {
+            // Keep what is showing; an unhandled exception would end the whole circuit.
+            Logger.LogError(ex, "Loading contacts failed");
+            if (version == loadVersion)
+            {
+                items ??= [];
+                errorNotice ??= "Couldn't load contacts. Please reload the page.";
+            }
+        }
+    }
+
+    /// <summary>
+    /// Runs a whole action handler (write, reload, reset) on its own. A click that Blazor Server
+    /// dispatches while an action is still running is ignored rather than saving twice.
+    /// </summary>
+    private async Task Exclusive(Func<Task> action)
+    {
+        if (busy)
+        {
+            return;
+        }
+
+        busy = true;
+        try
+        {
+            await action();
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    /// <summary>Runs one write; call it from inside <see cref="Exclusive"/>.</summary>
+    private async Task<bool> WriteAsync(Func<Task> write, string what)
+    {
+        try
+        {
+            await write();
+            errorNotice = null; // an old error shouldn't sit above a later success
+            return true;
+        }
+        catch (ValidationException ex)
+        {
+            formError = ex.Message;
+            return false;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "{What} failed", what);
+            errorNotice = $"Couldn't {what.ToLowerInvariant()}. Please try again.";
+            await LoadAsync();
+            return false;
+        }
+    }
+
+    private async Task ClearSearchAsync()
+    {
+        search = "";
+        await LoadAsync();
+        Announce("Search cleared.");
+        focusAfterRender = () => searchInput.FocusAsync().AsTask();
+    }
+
+    private void StartAdd()
+    {
+        editingId = null;
+        editModel = null;
+        pendingDeleteId = null;
+        formError = null;
+        newContact = new ContactInput();
+        adding = true;
+        focusAfterRender = () => addForm?.FocusAsync() ?? Task.CompletedTask;
+    }
+
+    private void CancelAdd()
+    {
+        adding = false;
+        formError = null;
+        focusAfterRender = () => addButton.FocusAsync().AsTask();
+    }
+
+    private Task AddAsync() => Exclusive(AddCoreAsync);
+
+    private async Task AddCoreAsync()
+    {
+        if (!adding)
+        {
+            return; // a late second click: the form already closed
+        }
+
+        formError = null;
+        var id = 0;
+        if (!await WriteAsync(async () => id = await Contacts.CreateAsync(newContact), "Add the contact"))
+        {
+            return;
+        }
+
+        adding = false;
+        await LoadAsync();
+        Announce($"{newContact.Name.Trim()} added.");
+        focusAfterRender = () => IsShown(id) && editButtons.TryGetValue(id, out var button)
+            ? button.FocusAsync().AsTask()
+            : addButton.FocusAsync().AsTask(); // hidden by the current search
+    }
+
+    private Task StartEditAsync(ContactSummary contact) => Exclusive(() => StartEditCoreAsync(contact));
+
+    private async Task StartEditCoreAsync(ContactSummary contact)
+    {
+        adding = false;
+        pendingDeleteId = null;
+        formError = null;
+        ContactInput? input = null;
+        if (!await WriteAsync(async () => input = await Contacts.GetForEditAsync(contact.Id), "Open the contact"))
+        {
+            return;
+        }
+
+        if (input is null)
+        {
+            errorNotice = $"{contact.Name} no longer exists. They may have been deleted elsewhere.";
+            await LoadAsync();
+            focusAfterRender = () => searchInput.FocusAsync().AsTask();
+            return;
+        }
+
+        editModel = input;
+        editingId = contact.Id;
+        focusAfterRender = () => editForm?.FocusAsync() ?? Task.CompletedTask;
+    }
+
+    private void CancelEdit(ContactSummary contact)
+    {
+        editingId = null;
+        editModel = null;
+        formError = null;
+        focusAfterRender = () => FocusButtonOrSearch(editButtons, contact.Id);
+    }
+
+    private Task SaveAsync(ContactSummary contact) => Exclusive(() => SaveCoreAsync(contact));
+
+    private async Task SaveCoreAsync(ContactSummary contact)
+    {
+        if (editingId != contact.Id || editModel is null)
+        {
+            return; // a late second click: the form already closed
+        }
+
+        formError = null;
+        var found = false;
+        if (!await WriteAsync(async () => found = await Contacts.UpdateAsync(contact.Id, editModel!), "Save the contact"))
+        {
+            return;
+        }
+
+        editingId = null;
+        editModel = null;
+        await LoadAsync();
+        if (!found)
+        {
+            errorNotice = $"{contact.Name} no longer exists. They may have been deleted elsewhere.";
+            focusAfterRender = () => searchInput.FocusAsync().AsTask();
+            return;
+        }
+
+        Announce("Contact saved.");
+        focusAfterRender = () => FocusButtonOrSearch(editButtons, contact.Id);
+    }
+
+    private void RequestDelete(ContactSummary contact)
+    {
+        editingId = null;
+        pendingDeleteId = contact.Id;
+        focusAfterRender = () => deleteCancelButton.FocusAsync().AsTask();
+    }
+
+    private void CancelDelete(ContactSummary contact)
+    {
+        pendingDeleteId = null;
+        focusAfterRender = () => FocusButtonOrSearch(deleteButtons, contact.Id);
+    }
+
+    private void OnConfirmKeyDown(KeyboardEventArgs e, ContactSummary contact)
+    {
+        if (e.Key == "Escape")
+        {
+            CancelDelete(contact);
+        }
+    }
+
+    private Task DeleteAsync(ContactSummary contact) => Exclusive(() => DeleteCoreAsync(contact));
+
+    private async Task DeleteCoreAsync(ContactSummary contact)
+    {
+        pendingDeleteId = null;
+        if (!await WriteAsync(() => Contacts.DeleteAsync(contact.Id), "Delete the contact"))
+        {
+            return;
+        }
+
+        editButtons.Remove(contact.Id);
+        deleteButtons.Remove(contact.Id);
+        await LoadAsync();
+        Announce($"{contact.Name} deleted.");
+        focusAfterRender = () => items is { Count: > 0 } ? summary.FocusAsync().AsTask() : searchInput.FocusAsync().AsTask();
+    }
+
+    private Task FocusButtonOrSearch(Dictionary<int, ElementReference> refs, int id) =>
+        (IsShown(id) && refs.TryGetValue(id, out var button) ? button : searchInput).FocusAsync().AsTask();
+
+    /// <summary>
+    /// Whether the contact is in the current results. A @ref dictionary entry outlives its element
+    /// (e.g. a contact renamed out of the search), so ask the data rather than the dictionary.
+    /// </summary>
+    private bool IsShown(int id) => items?.Any(i => i.Contact.Id == id) == true;
+
+    /// <summary>
+    /// Sets the live region text. The same text twice in a row would be silent (nothing changed),
+    /// so a trailing no-break space is toggled to make it change.
+    /// </summary>
+    private void Announce(string text) =>
+        announcement = announcement == text ? text + " " : text;
+}

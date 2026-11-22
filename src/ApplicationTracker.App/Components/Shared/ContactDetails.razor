@@ -1,0 +1,47 @@
+@* A contact's name, role, company and ways to reach them. Only filled-in fields are shown.
+   The name is a heading so a long list can be navigated by heading; the page picks the level. *@
+@if (HeadingLevel == 2)
+{
+    <h2 class="contact-name">@Contact.Name</h2>
+}
+else
+{
+    <h3 class="contact-name">@Contact.Name</h3>
+}
+@if (RoleAndCompany is { Length: > 0 } line)
+{
+    <div class="contact-role">@line</div>
+}
+@if (Contact.Email is not null || Contact.Phone is not null || Contact.LinkedInUrl is not null)
+{
+    <ul class="contact-links">
+        @if (Contact.Email is { } email)
+        {
+            <li><a href="@($"mailto:{email}")">@email</a></li>
+        }
+        @if (Contact.Phone is { } phone)
+        {
+            <li><a href="@($"tel:{TelNumber(phone)}")">@phone</a></li>
+        }
+        @if (Contact.LinkedInUrl is { } linkedIn)
+        {
+            <li>
+                <a href="@linkedIn" target="_blank" rel="noopener noreferrer">LinkedIn<span aria-hidden="true"> ↗</span><span class="visually-hidden"> profile of @Contact.Name (opens in a new tab)</span></a>
+            </li>
+        }
+    </ul>
+}
+
+@code {
+    [Parameter, EditorRequired] public ContactSummary Contact { get; set; } = default!;
+
+    /// <summary>2 on the Contacts page (names under the h1), 3 inside a section (the detail page).</summary>
+    [Parameter] public int HeadingLevel { get; set; } = 3;
+
+    private string RoleAndCompany =>
+        string.Join(" at ", new[] { Contact.Role, Contact.CompanyName }.Where(s => !string.IsNullOrEmpty(s)));
+
+    /// <summary>Digits and a leading + only, so "0123 456 789" dials correctly.</summary>
+    private static string TelNumber(string phone) =>
+        new(phone.Trim().Where((c, i) => char.IsDigit(c) || (c == '+' && i == 0)).ToArray());
+}

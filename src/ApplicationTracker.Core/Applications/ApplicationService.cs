@@ -1,6 +1,8 @@
 using System.ComponentModel.DataAnnotations;
+using ApplicationTracker.Core.Contacts;
 using ApplicationTracker.Core.Data;
 using ApplicationTracker.Core.Domain;
+using ApplicationTracker.Core.Notes;
 using Microsoft.EntityFrameworkCore;
 
 namespace ApplicationTracker.Core.Applications;
@@ -147,6 +149,64 @@ public class ApplicationService(IDbContextFactory<TrackerDbContext> dbFactory, T
             .ThenBy(c => c.Id)
             .ToList();
 
+    /// <summary>
+    /// Everything the detail page shows: the application's fields, follow-up state, days in
+    /// its current stage, notes (newest first) and linked contacts (by name). Null if it doesn't exist.
+    /// </summary>
+    public async Task<ApplicationDetails?> GetDetailsAsync(int id, CancellationToken ct = default)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        var row = await db.Applications.AsNoTracking()
+            .Where(a => a.Id == id)
+            .Select(a => new
+            {
+                a.Id,
+                a.RoleTitle,
+                CompanyName = a.Company.Name,
+                a.CurrentStatus,
+                a.PostingUrl,
+                a.Location,
+                a.SalaryRange,
+                a.Source,
+                a.AppliedOn,
+                a.FollowUpOn,
+                a.CreatedAt,
+                a.UpdatedAt,
+                LastChangedAt = a.StatusHistory
+                    .OrderByDescending(s => s.ChangedAt)
+                    .Select(s => (DateTime?)s.ChangedAt)
+                    .FirstOrDefault(),
+                Notes = a.Notes
+                    .OrderByDescending(n => n.CreatedAt)
+                    .ThenByDescending(n => n.Id)
+                    .Select(n => new NoteView(n.Id, n.Body, n.CreatedAt, n.UpdatedAt))
+                    .ToList(),
+                Contacts = a.Contacts
+                    .OrderBy(c => TrackerDbContext.UnicodeLower(c.Name))
+                    .ThenBy(c => c.Id)
+                    .Select(c => new ContactSummary(c.Id, c.Name, c.Role, c.Email, c.Phone, c.LinkedInUrl,
+                        c.Company == null ? null : c.Company.Name))
+                    .ToList(),
+            })
+            .AsSplitQuery()
+            .SingleOrDefaultAsync(ct);
+
+        if (row is null)
+        {
+            return null;
+        }
+
+        var today = Today;
+        return new ApplicationDetails(
+            row.Id, row.RoleTitle, row.CompanyName, row.CurrentStatus,
+            row.PostingUrl, row.Location, row.SalaryRange, row.Source,
+            row.AppliedOn, row.FollowUpOn,
+            GetFollowUpState(row.CurrentStatus, row.FollowUpOn, today),
+            GetDaysInStage(row.LastChangedAt ?? row.CreatedAt, today),
+            row.CreatedAt, row.UpdatedAt,
+            row.Notes, row.Contacts);
+    }
+
     /// <summary>The application's current values as form input, or null if it doesn't exist.</summary>
     public async Task<ApplicationInput?> GetForEditAsync(int id, CancellationToken ct = default)
     {
@@ -189,7 +249,7 @@ public class ApplicationService(IDbContextFactory<TrackerDbContext> dbFactory, T
 
         var app = new JobApplication
         {
-            Company = await FindOrCreateCompanyAsync(db, input.Company, ct),
+            Company = await CompanyLookup.FindOrCreateAsync(db, input.Company, ct),
             RoleTitle = input.RoleTitle.Trim(),
             CreatedAt = now,
             UpdatedAt = now,
@@ -332,7 +392,7 @@ public class ApplicationService(IDbContextFactory<TrackerDbContext> dbFactory, T
             return;
         }
 
-        var target = await FindOrCreateCompanyAsync(db, newName, ct);
+        var target = await CompanyLookup.FindOrCreateAsync(db, newName, ct);
         if (target.Id == current.Id)
         {
             return;
@@ -345,14 +405,6 @@ public class ApplicationService(IDbContextFactory<TrackerDbContext> dbFactory, T
         {
             db.Companies.Remove(current);
         }
-    }
-
-    private static async Task<Company> FindOrCreateCompanyAsync(TrackerDbContext db, string name, CancellationToken ct)
-    {
-        var trimmed = name.Trim();
-        var lowered = trimmed.ToLowerInvariant();
-        return await db.Companies.FirstOrDefaultAsync(c => TrackerDbContext.UnicodeLower(c.Name) == lowered, ct)
-            ?? new Company { Name = trimmed };
     }
 
     /// <summary>Matches company or role. Unicode-aware and literal: %, _ and \ have no special meaning.</summary>
