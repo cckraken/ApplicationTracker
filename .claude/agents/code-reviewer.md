@@ -13,7 +13,7 @@ Start from `git diff` and `git diff --staged`. If both are empty, review the las
 ## What to look for, most important first
 
 1. **Privacy and secrets**: anything that reads, logs or commits the real database; secrets or credentials in code, config or test data.
-2. **Correctness**: wrong pipeline behaviour or missing `StatusChange` history; off-by-one date logic (overdue, due today, week buckets); UTC vs local date mix-ups; null handling; wrong stats.
+2. **Correctness**: wrong pipeline behaviour or missing `StatusChange` history; off-by-one date logic (overdue, due today, week buckets); UTC vs local date mix-ups; an action that overwrites a value without checking it still matches what the screen showed (like `ApplicationInput.OriginalStatus` or the follow-up `expected` date); null handling; wrong stats.
 3. **Data**: model changes without a migration, or anything breaking the migration rules; N+1 queries; tracking misuse; cascade deletes that could drop notes or history unexpectedly.
 4. **Async**: `.Result` / `.Wait()`, `async void` outside event handlers, missing `await`, a `CancellationToken` not passed on.
 5. **Time**: the real clock used in logic instead of the injected `TimeProvider`.
