@@ -23,6 +23,8 @@
     "deny": [
       "Read(/data/**)",
       "Edit(/data/**)",
+      "Read(~/AppData/Local/ApplicationTracker/**)",
+      "Edit(~/AppData/Local/ApplicationTracker/**)",
       "Read(**/*.db)",
       "Edit(**/*.db)",
       "Read(**/*.sqlite*)",

@@ -12,7 +12,7 @@ Start from `git diff` and `git diff --staged`. If both are empty, review the las
 
 ## What to look for, most important first
 
-1. **Privacy and secrets**: anything that reads, logs or commits the real database or its documents folder; anything that sends data off this machine, or puts notes or contacts into the feedback prompt; stored file paths built from user input (file names must not escape the documents folder); secrets or credentials in code, config or test data.
+1. **Privacy and secrets**: anything that reads, logs or commits the real database or its documents folder; anything that sends data off this machine, or puts notes or contacts into the feedback prompt; stored file paths built from user input (file names must not escape the documents folder); secrets or credentials in code, config or test data; `.github/workflows/` changes that widen `permissions` or put untrusted input (tag names, PR text) straight into a script.
 2. **Correctness**: wrong pipeline behaviour or missing `StatusChange` history; off-by-one date logic (overdue, due today, week buckets); UTC vs local date mix-ups; an action that overwrites a value without checking it still matches what the screen showed (like `ApplicationInput.OriginalStatus` or the follow-up `expected` date); null handling; wrong stats.
 3. **Data**: model changes without a migration, or anything breaking the migration rules; N+1 queries; tracking misuse; cascade deletes that could drop notes or history unexpectedly.
 4. **Async**: `.Result` / `.Wait()`, `async void` outside event handlers, missing `await`, a `CancellationToken` not passed on.
@@ -20,7 +20,7 @@ Start from `git diff` and `git diff --staged`. If both are empty, review the las
 6. **Blazor Server**: anything that breaks the page patterns in `.claude/rules/blazor-ui.md`.
 7. **Architecture**: anything that breaks "Layout and ownership" in `CLAUDE.md`. For new logic in a component or page, search `src/ApplicationTracker.Core` for a method that already does it before accepting it.
 8. **Tests**: new logic without tests, or tests that break `.claude/rules/tests.md`.
-9. **Git**: work on `main` (`git branch --show-current`), or branch names and commit subjects that break the Git section of `CLAUDE.md`.
+9. **Git and docs**: work on `main` (`git branch --show-current`), or branch names, commit subjects or user docs (`README.md`, `packaging/windows/README.txt`) that break the Git section of `CLAUDE.md`.
 
 Known gaps are open GitHub issues (`gh issue list`). Mention one only if the change touches it; don't report it as new.
 

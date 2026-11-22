@@ -26,6 +26,7 @@ One owner per job (use these; don't re-implement them):
 - Documents (CV and cover-letter versions) and their files: only `DocumentService`, which is the one user of `IDocumentStore` (files in a folder per database, e.g. `data/tracker.dev-documents/`). Allowed file types and the size limit live there and on `Document`.
 - CV and cover-letter feedback packs (prompt and zip): only `FeedbackPackService` in `Core/Feedback/`, filling the embedded template `cv-feedback-prompt.md`. The app never calls an LLM or sends anything off this machine; the prompt holds only role, company, location, job description and the document, never notes, contacts or other personal details.
 - Snooze dates (follow-ups and reminders): `SnoozePeriod.DueFrom` in `Core/Applications/ApplicationModels.cs`.
+- Where data lives (repo `data/` or the installed folder): only `DataLocation.ResolveDirectory`.
 - Stats dashboard figures and week buckets: `StatsService` (`GetDashboardAsync`; Monday weeks via `StatsService.WeekStart`). The definitions are on the records in `Core/Stats/StatsModels.cs`; the UI shows them and never recomputes them.
 - Before adding logic anywhere, search `Core` for a method that already does it.
 
@@ -46,6 +47,9 @@ Area-specific rules live in `.claude/rules/` and load when you open files in tha
 - Branches: `<type>/<issue-number>-<short-description>` (`feat/42-csv-export`), or without the number when there's no issue (`feat/board`). Types: `feat`, `fix`, `chore`, `docs`, `refactor`, `test`.
 - Commits and PR titles: Conventional Commits, `<type>(<scope>): <subject>`, subject under 50 characters, imperative, no trailing period. Footer `Refs #42` when there's an issue.
 - PRs (with `gh`, when asked): run `dotnet build` and `dotnet test` first. Description: **Summary** (1–3 bullets: what and why), **Testing** (how it was verified), `Closes #<n>` if there's an issue.
+- CI (`.github/workflows/ci.yml`) builds and tests every PR and push to `main`.
+- Releases: the user pushes a `v*` tag, and `release.yml` builds the Windows zip and creates the GitHub Release. Never create or push tags, or edit the release workflow, unless asked.
+- When user-facing behaviour changes (pages, start scripts, data location), update `README.md` and `packaging/windows/README.txt` in the same change.
 
 ## Commands
 
@@ -59,15 +63,16 @@ dotnet ef migrations add <Name> --project src/ApplicationTracker.Core --startup-
 dotnet ef database update --project src/ApplicationTracker.Core --startup-project src/ApplicationTracker.App
 ```
 
-`run.ps1` starts the app for real use against the real database. Never run it, and never pass `--Tracker:DatabaseFile tracker.db` to any command.
+`run.ps1` and `packaging/windows/Start ApplicationTracker.cmd` start the app for real use against the real database. Never run either, and never pass `--Tracker:DatabaseFile tracker.db` to any command. A copy run outside the repo (for example `dotnet publish` output) keeps its data in `%LOCALAPPDATA%\ApplicationTracker\data` (see `Core/DataLocation.cs`), the real data of the downloaded app: when trying one, pass `--Tracker:DataDirectory` with a temp folder.
 
 ## Data rules
 
 - `data/tracker.db` is the **real** database with personal job-search data: never read, query, copy or commit it. Only `run.ps1` uses it.
 - `data/<db name>-documents/` folders hold the uploaded CV and cover-letter files for that database. `data/tracker-documents/` (next to `tracker.db`) is personal data under the same rules: never read, copy or commit it. Use `data/tracker.dev-documents/` or a temp folder in tests.
+- `%LOCALAPPDATA%\ApplicationTracker\` holds the downloaded app's real data (`tracker.db`, `tracker-documents/`, plus the demo's `demo.db`) under the same rules: never read, query, copy or commit it.
 - `data/tracker.dev.db` is the Development database, seeded with fictional demo data when empty. Develop and test only against Development mode, seed data and test fixtures.
 - Never put secrets (API keys, tokens, passwords, connection strings with credentials) in code, `appsettings*.json` or commits. Locally they go in user-secrets (`dotnet user-secrets`).
-- `.claude/settings.json` denies file access to `data/`, `*.db`, `*.sqlite*` and secrets; that doesn't cover programs you run, so the rules above still apply to commands.
+- `.claude/settings.json` denies file access to `data/`, `*.db`, `*.sqlite*`, the installed data folder and secrets; that doesn't cover programs you run, so the rules above still apply to commands.
 
 ## Subagents
 

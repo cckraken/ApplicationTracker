@@ -1,0 +1,90 @@
+# Builds the Windows download and publishes it as a GitHub Release when a version tag is pushed:
+#   git tag v1.0.0
+#   git push origin v1.0.0
+# Nothing is published until a v* tag is pushed. A tag with a suffix (v1.1.0-beta.1) becomes a pre-release.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write # to create the Release and upload the zip
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      # Actions are pinned to exact commits. The write token is not left in .git/config, so the
+      # build and tests (which run third-party packages) never see it; only the last step uses it.
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          dotnet-version: 10.0.x
+
+      # The tag comes in through an environment variable, never pasted into the script, and must
+      # look like a version before it is used anywhere else.
+      - name: Work out the version from the tag
+        id: version
+        shell: pwsh
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          $tag = $env:TAG
+          $version = $tag.TrimStart('v')
+          if ($version -notmatch '^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$') {
+            throw "Tag '$tag' isn't a version like v1.2.3."
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "prerelease=$($version.Contains('-'))" >> $env:GITHUB_OUTPUT
+
+      - name: Test
+        run: dotnet test -c Release
+
+      - name: Publish (self-contained, no .NET install needed)
+        run: >-
+          dotnet publish src/ApplicationTracker.App -c Release -r win-x64 --self-contained
+          -p:Version=${{ steps.version.outputs.version }}
+          -o out/ApplicationTracker
+
+      # appsettings.Production.json exists only in the release, never in the repo: it makes a
+      # double-clicked ApplicationTracker.App.exe behave like "Start ApplicationTracker.cmd" (real
+      # data in tracker.db, port 5180, browser opens). In the repo, Production must not default to
+      # the real database (see CLAUDE.md).
+      - name: Add start scripts, release settings, readme and licences
+        shell: pwsh
+        run: |
+          Copy-Item packaging/windows/* out/ApplicationTracker/
+          Copy-Item LICENSE, THIRD-PARTY-NOTICES.txt out/ApplicationTracker/
+          @{
+            Urls = 'http://localhost:5180'
+            Tracker = @{ DatabaseFile = 'tracker.db'; OpenBrowser = $true }
+          } | ConvertTo-Json | Set-Content -Encoding utf8 out/ApplicationTracker/appsettings.Production.json
+
+      - name: Zip
+        id: zip
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          $zip = "ApplicationTracker-$env:VERSION-win-x64.zip"
+          # Zip the folder's contents, so "Extract All" gives one folder with the start scripts in it.
+          Compress-Archive -Path out/ApplicationTracker/* -DestinationPath $zip
+          "zip=$zip" >> $env:GITHUB_OUTPUT
+
+      - name: Create the GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ steps.version.outputs.version }}
+          ZIP: ${{ steps.zip.outputs.zip }}
+          PRERELEASE: ${{ steps.version.outputs.prerelease }}
+        run: |
+          $flags = @('--title', "Application Tracker $env:VERSION", '--generate-notes')
+          if ($env:PRERELEASE -eq 'True') { $flags += '--prerelease' }
+          gh release create $env:TAG $env:ZIP @flags

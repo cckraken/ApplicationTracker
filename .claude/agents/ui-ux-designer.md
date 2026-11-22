@@ -25,4 +25,4 @@ Read the pages and shared components you'll touch, and `wwwroot/app.css`. Build 
 
 ## Output
 
-Brief design decisions, the files changed, the `dotnet build` result, and follow-ups (data or logic needed in `Core`, accessibility gaps you couldn't close). Say that the result hasn't been checked in a browser, so the caller can do that.
+Brief design decisions, the files changed, the `dotnet build` result, and follow-ups (data or logic needed in `Core`, accessibility gaps you couldn't close, screenshots in `docs/images/` the change makes out of date). Say that the result hasn't been checked in a browser, so the caller can do that.
