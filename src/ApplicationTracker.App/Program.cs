@@ -3,6 +3,7 @@ using ApplicationTracker.Core.Applications;
 using ApplicationTracker.Core.Contacts;
 using ApplicationTracker.Core.Data;
 using ApplicationTracker.Core.Documents;
+using ApplicationTracker.Core.Feedback;
 using ApplicationTracker.Core.Notes;
 using ApplicationTracker.Core.Reminders;
 using ApplicationTracker.Core.Stats;
@@ -42,6 +43,7 @@ builder.Services.AddScoped<StatsService>();
 var documentsDirectory = Path.Combine(dataDirectory, Path.GetFileNameWithoutExtension(databasePath) + "-documents");
 builder.Services.AddSingleton<IDocumentStore>(new FileSystemDocumentStore(documentsDirectory));
 builder.Services.AddScoped<DocumentService>();
+builder.Services.AddScoped<FeedbackPackService>();
 
 var app = builder.Build();
 
@@ -77,6 +79,13 @@ app.MapGet("/documents/{id:int}/file", async (int id, DocumentService documents,
     await documents.OpenFileAsync(id, ct) is { } file
         ? Results.File(file.Content, file.ContentType, file.FileName)
         : Results.NotFound());
+
+// A CV feedback pack: the ready-made prompt and the document in one zip, for use with Claude Code.
+app.MapGet("/applications/{applicationId:int}/documents/{documentId:int}/feedback-pack",
+    async (int applicationId, int documentId, FeedbackPackService packs, CancellationToken ct) =>
+        await packs.CreateZipAsync(applicationId, documentId, ct) is { } zip
+            ? Results.File(zip.Content, "application/zip", zip.FileName)
+            : Results.NotFound());
 
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();

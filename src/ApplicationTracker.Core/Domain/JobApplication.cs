@@ -16,6 +16,12 @@ public class JobApplication
     /// <summary>Where the posting came from, e.g. job board, referral, company site.</summary>
     public string? Source { get; set; }
 
+    /// <summary>Longest job description accepted (characters).</summary>
+    public const int MaxPostingTextLength = 20000;
+
+    /// <summary>The job description, pasted from the posting; used for CV feedback.</summary>
+    public string? PostingText { get; set; }
+
     public DateOnly? AppliedOn { get; set; }
     public DateOnly? FollowUpOn { get; set; }
 

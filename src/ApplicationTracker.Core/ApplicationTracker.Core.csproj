@@ -10,4 +10,9 @@
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.15" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- The CV feedback prompt template, read by FeedbackPackService. -->
+    <EmbeddedResource Include="Feedback\cv-feedback-prompt.md" LogicalName="ApplicationTracker.Core.Feedback.cv-feedback-prompt.md" />
+  </ItemGroup>
+
 </Project>

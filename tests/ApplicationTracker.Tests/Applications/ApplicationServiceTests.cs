@@ -565,4 +565,89 @@ public sealed class ApplicationServiceTests : IDisposable
 
         Assert.Equal("Original", (await _service.GetForEditAsync(id))!.RoleTitle);
     }
+
+    // ---- Job description (PostingText) ----
+
+    private static ApplicationInput WithPostingText(string? text)
+    {
+        var input = Input();
+        input.PostingText = text;
+        return input;
+    }
+
+    [Fact]
+    public async Task Create_stores_the_job_description_trimmed_and_GetForEdit_returns_it()
+    {
+        var id = await _service.CreateAsync(WithPostingText("  We are hiring.\r\n\r\nSQL required.  \n"));
+
+        Assert.Equal("We are hiring.\r\n\r\nSQL required.", (await _service.GetForEditAsync(id))!.PostingText);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData(" \r\n\t ")]
+    public async Task Create_stores_a_blank_job_description_as_null(string text)
+    {
+        var id = await _service.CreateAsync(WithPostingText(text));
+
+        Assert.Null((await _service.GetForEditAsync(id))!.PostingText);
+    }
+
+    [Fact]
+    public async Task Update_stores_the_job_description_trimmed()
+    {
+        var id = await _service.CreateAsync(Input());
+        var form = await _service.GetForEditAsync(id);
+
+        form!.PostingText = "\n Senior analyst role. ";
+        await _service.UpdateAsync(id, form);
+
+        Assert.Equal("Senior analyst role.", (await _service.GetForEditAsync(id))!.PostingText);
+    }
+
+    [Fact]
+    public async Task Update_with_a_blank_job_description_clears_it()
+    {
+        var id = await _service.CreateAsync(WithPostingText("Old description"));
+        var form = await _service.GetForEditAsync(id);
+
+        form!.PostingText = "   ";
+        await _service.UpdateAsync(id, form);
+
+        Assert.Null((await _service.GetForEditAsync(id))!.PostingText);
+    }
+
+    [Fact]
+    public async Task Create_accepts_a_job_description_at_the_maximum_length()
+    {
+        var text = new string('x', JobApplication.MaxPostingTextLength);
+
+        var id = await _service.CreateAsync(WithPostingText(text));
+
+        Assert.Equal(text, (await _service.GetForEditAsync(id))!.PostingText);
+    }
+
+    [Fact]
+    public async Task Create_rejects_a_job_description_over_the_maximum_length()
+    {
+        var input = WithPostingText(new string('x', JobApplication.MaxPostingTextLength + 1));
+
+        await Assert.ThrowsAsync<ValidationException>(() => _service.CreateAsync(input));
+
+        using var db = _db.CreateDbContext();
+        Assert.Equal(0, await db.Applications.CountAsync());
+    }
+
+    [Fact]
+    public async Task Update_rejects_a_job_description_over_the_maximum_length_and_keeps_the_old_one()
+    {
+        var id = await _service.CreateAsync(WithPostingText("Original description"));
+        var form = await _service.GetForEditAsync(id);
+
+        form!.PostingText = new string('x', JobApplication.MaxPostingTextLength + 1);
+        await Assert.ThrowsAsync<ValidationException>(() => _service.UpdateAsync(id, form));
+
+        Assert.Equal("Original description", (await _service.GetForEditAsync(id))!.PostingText);
+    }
 }

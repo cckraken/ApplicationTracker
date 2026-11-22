@@ -225,6 +225,7 @@ public class ApplicationService(IDbContextFactory<TrackerDbContext> dbFactory, T
                 Source = a.Source,
                 AppliedOn = a.AppliedOn,
                 FollowUpOn = a.FollowUpOn,
+                PostingText = a.PostingText,
             })
             .SingleOrDefaultAsync(ct);
     }
@@ -407,6 +408,7 @@ public class ApplicationService(IDbContextFactory<TrackerDbContext> dbFactory, T
         app.Source = Clean(input.Source);
         app.AppliedOn = input.AppliedOn;
         app.FollowUpOn = input.FollowUpOn;
+        app.PostingText = Clean(input.PostingText);
     }
 
     private static async Task ApplyCompanyChangeAsync(TrackerDbContext db, JobApplication app, string newName, CancellationToken ct)

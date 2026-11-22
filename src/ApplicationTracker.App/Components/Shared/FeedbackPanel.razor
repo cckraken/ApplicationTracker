@@ -1,0 +1,182 @@
+@* Helps the user get feedback on a CV or cover letter from a chat assistant of their choice, at no
+   cost to the app: shows the ready-made prompt, copies it, and offers the document and a zip pack.
+   Nothing is sent anywhere by the app. *@
+@using ApplicationTracker.Core.Feedback
+@inject FeedbackPackService FeedbackPacks
+@inject IJSRuntime JS
+@inject ILogger<FeedbackPanel> Logger
+
+<section class="feedback-panel" aria-labelledby="@HeadingId">
+    <div class="feedback-panel-header">
+        <h3 id="@HeadingId" class="h6 mb-0" tabindex="-1" @ref="panelHeading">
+            Get feedback@(pack is null ? "" : $" on {pack.DocumentTitle}")
+        </h3>
+        <button type="button" class="btn-close" aria-label="Close feedback" @onclick="OnClose"></button>
+    </div>
+
+    <p class="visually-hidden" role="status" aria-live="polite">@announcement</p>
+
+    @if (loadError is not null)
+    {
+        <div class="alert alert-danger py-2 mb-0" role="alert">@loadError</div>
+    }
+    else if (pack is null)
+    {
+        <p class="text-body-secondary mb-0">Preparing…</p>
+    }
+    else
+    {
+        @if (!pack.HasPostingText)
+        {
+            @* Static advice shown on open, not a change to announce, so no alert/status role.
+               role="note" was dropped: it means "aside" and is poorly supported. *@
+            <div class="alert alert-warning py-2 small">
+                <strong>No job description yet.</strong> The feedback will be general rather than about this role.
+                <a href="@($"applications/{ApplicationId}/edit")">Add the job description</a> to get feedback that fits.
+            </div>
+        }
+
+        <p class="small mb-2">Use any chat assistant. It takes a minute:</p>
+        <ol class="feedback-steps">
+            <li>
+                <span class="feedback-step-text">Download your file.</span>
+                <a class="btn btn-outline-secondary btn-sm" href="@DocumentDisplay.FileUrl(pack.DocumentId)" download
+                   aria-describedby="@FileNameId">Download file</a>
+                <span id="@FileNameId" class="feedback-file-name small text-body-secondary">@pack.DocumentFileName</span>
+            </li>
+            <li>
+                Open a new chat, for example on <a href="https://claude.ai/new" target="_blank" rel="noopener noreferrer">claude.ai<span class="visually-hidden"> (opens in a new tab)</span></a>,
+                and attach the file.
+            </li>
+            <li>
+                <span class="feedback-step-text">Copy the prompt, paste it into the chat and send it.</span>
+                <button type="button" class="btn btn-primary btn-sm" @onclick="CopyPromptAsync">Copy prompt</button>
+                @if (copyState == CopyState.Copied)
+                {
+                    <span class="small text-success-emphasis ms-1">Copied</span>
+                }
+                else if (copyState == CopyState.Failed)
+                {
+                    <span class="d-block small text-danger-emphasis mt-1">
+                        Copying didn't work here. Select the prompt below and copy it yourself (Ctrl+C).
+                    </span>
+                }
+            </li>
+            <li>Paste the useful parts of the reply into a note on this application.</li>
+        </ol>
+
+        <details class="feedback-preview" open="@(copyState == CopyState.Failed)">
+            <summary>See the prompt</summary>
+            <label for="@PromptId" class="visually-hidden">Prompt to copy</label>
+            <textarea id="@PromptId" class="form-control form-control-sm" rows="10" readonly>@pack.Prompt</textarea>
+        </details>
+
+        <p class="small text-body-secondary mt-2 mb-0">
+            The prompt holds only the role, company, location, job description (or, without one, the posting link)
+            and the file's name. Nothing leaves this computer unless you paste or attach it yourself.
+        </p>
+        <p class="small text-body-secondary mt-1 mb-0">
+            Using Claude Code? <a href="@PackUrl" download>Download the pack</a> (prompt and file in one zip),
+            unzip it outside the app's data folder, and ask the <code>cv-reviewer</code> agent to review it.
+        </p>
+    }
+</section>
+
+@code {
+    [Parameter, EditorRequired] public int ApplicationId { get; set; }
+    [Parameter, EditorRequired] public int DocumentId { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private FeedbackPack? pack;
+    private string? loadError;
+    private CopyState copyState;
+    private (int ApplicationId, int DocumentId)? loadedFor;
+    private string announcement = "";
+    private ElementReference panelHeading;
+    private bool focusHeading = true;
+
+    private string HeadingId => $"feedback-heading-{DocumentId}";
+    private string FileNameId => $"feedback-file-{DocumentId}";
+    private string PromptId => $"feedback-prompt-{DocumentId}";
+    private string PackUrl => $"applications/{ApplicationId}/documents/{DocumentId}/feedback-pack";
+
+    private enum CopyState { NotCopied, Copied, Failed }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        // The parent re-renders (and passes a new OnClose) after unrelated actions such as linking
+        // another document; only rebuild when the document or application actually changed, so the
+        // "Copied" marker and an open preview survive.
+        if (loadedFor == (ApplicationId, DocumentId))
+        {
+            return;
+        }
+
+        var requested = (ApplicationId, DocumentId);
+        loadedFor = requested;
+        pack = null;
+        loadError = null;
+        copyState = CopyState.NotCopied;
+        try
+        {
+            var built = await FeedbackPacks.BuildAsync(requested.ApplicationId, requested.DocumentId);
+            if (loadedFor != requested)
+            {
+                return; // the parameters changed while this was loading; the newer load wins
+            }
+
+            pack = built;
+            if (pack is null)
+            {
+                loadError = "This document is no longer linked to the application. Close this and refresh the page.";
+            }
+        }
+        catch (Exception ex) when (loadedFor == requested)
+        {
+            Logger.LogError(ex, "Failed to build a feedback pack for application {ApplicationId}, document {DocumentId}", ApplicationId, DocumentId);
+            loadError = "The feedback prompt couldn't be prepared. Please try again.";
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (focusHeading)
+        {
+            focusHeading = false;
+            try
+            {
+                await panelHeading.FocusAsync();
+            }
+            catch (Exception ex) when (ex is JSException or JSDisconnectedException)
+            {
+                // The panel closed, or the connection dropped, before it could be focused.
+            }
+        }
+    }
+
+    private async Task CopyPromptAsync()
+    {
+        if (pack is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", pack.Prompt);
+            copyState = CopyState.Copied;
+            Announce("Prompt copied. Paste it into the chat.");
+        }
+        catch (Exception ex)
+        {
+            // Any failure (blocked clipboard, dropped connection) falls back to copying by hand;
+            // an unhandled exception here would end the circuit.
+            Logger.LogWarning(ex, "Copying the feedback prompt failed");
+            copyState = CopyState.Failed;
+            Announce("Copying didn't work. The prompt is shown below: select it and copy it yourself.");
+        }
+    }
+
+    private void Announce(string text) =>
+        announcement = announcement == text ? text + " " : text;
+}
