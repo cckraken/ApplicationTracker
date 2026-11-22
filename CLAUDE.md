@@ -22,7 +22,8 @@ One owner per job (use these; don't re-implement them):
 - Status changes: only `JobApplication.ChangeStatus`, which writes the `StatusChange` history.
 - Board and list moves: `ApplicationService` decides the target status and returns a `MoveResult`; the UI never works out a status itself.
 - Company find-or-create and unused-company cleanup: `Core/Applications/CompanyLookup.cs`.
-- Notes and contacts: `NoteService` and `ContactService`.
+- Notes, contacts and reminders: `NoteService`, `ContactService` and `ReminderService`. A reminder's done state changes only through `Reminder.Complete`/`Reopen`; overdue and due-today for reminders come from `Reminder.IsOverdueOn`/`IsDueTodayOn`.
+- Snooze dates (follow-ups and reminders): `SnoozePeriod.DueFrom` in `Core/Applications/ApplicationModels.cs`.
 - Before adding logic anywhere, search `Core` for a method that already does it.
 
 Area-specific rules live in `.claude/rules/` and load when you open files in that area (Blazor pages, `Core` data, tests).
@@ -31,7 +32,7 @@ Area-specific rules live in `.claude/rules/` and load when you open files in tha
 
 - Async all the way for I/O; pass `CancellationToken` where available.
 - Store timestamps in UTC; convert to local time only in the UI.
-- Get "now" and "today" from the injected `TimeProvider` (`ApplicationService.Today` is the local date). Never `DateTime.Now`, `DateTime.UtcNow` or `DateTime.Today` in logic.
+- Get "now" and "today" from the injected `TimeProvider` (the local date is `TimeProvider.GetLocalToday()` from `Core/TimeProviderExtensions.cs`). Never `DateTime.Now`, `DateTime.UtcNow` or `DateTime.Today` in logic.
 - New logic comes with tests. Run `dotnet test` before saying a change is done.
 - Code style follows `dotnet format`; a hook runs it on every `.cs` file Claude edits.
 - Known gaps and follow-ups are GitHub issues (`gh issue list`). Fix one only when asked or when the change touches it.
