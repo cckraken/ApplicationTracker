@@ -14,7 +14,7 @@ Build on these rather than starting over:
 - **Shared components**: `Components/Shared/` (`StatusBadge`, `FollowUpBadge`, `ApplicationForm`, `ContactForm` (focuses the first invalid field via `OnInvalidSubmit`; `FocusAsync()`), `ContactDetails` (`HeadingLevel` parameter)). Reuse or extend them before creating new ones.
 - **Component styles**: use CSS isolation (`Component.razor.css`) for styles specific to one component.
 - **Pages**: `Components/Pages/` (board, list, new/edit application, `ApplicationDetail.razor` at `/applications/{id}`, `ContactList.razor` at `/contacts`). The detail page is the main view of an application: board, list and Today link to it, and the edit/new forms return to it with `?saved=true`, which the page shows as "Saved." and then strips with a replace navigation.
-- **Page patterns** (`Components/Pages/ApplicationDetail.razor` is the reference; `ContactList.razor` follows it): `Exclusive(...)` wraps each action handler, including its reload/reset, so a late second click is ignored, and handlers bail out if their form already closed; `WriteAsync` runs one write and turns a `ValidationException` into a field error; `LoadAsync` catches everything, because an unhandled exception ends the Blazor Server circuit; `Announce(text)` toggles a trailing no-break space so identical announcements are re-read in the polite live region; focus is restored after re-render via `focusAfterRender`, with fallbacks that check the data (`FocusIfPresent`), not just `@ref` dictionaries; one `<h1>` rendered in every state (loading, not found, loaded) so `FocusOnNavigate` finds it.
+- **Page patterns**: follow "Page patterns (Blazor Server)" in `CLAUDE.md`, including its gotchas. `ApplicationDetail.razor` is the reference implementation.
 - **Board** (`Components/Pages/Board.razor`): keyboard alternatives to drag and drop (← / → buttons and a Blazor-controlled `<details>` "Move to…" menu, one open at a time, Escape closes); moves serialized with a `SemaphoreSlim`. Data comes from `ApplicationService.GetBoardAsync` (`BoardView`, `BoardColumn`, `BoardCard.DaysInStage`); use `ApplicationStatusExtensions.Pipeline`, `PreviousInPipeline()` and `NextInPipeline()` for column order and labels instead of hard-coding them.
 - **Status moves** are decided in `Core`: call `ApplicationService.MoveToAsync`, `MoveInPipelineAsync(id, PipelineDirection)` or `CloseAsync` and show/announce/focus from the returned `MoveResult` (Moved/Unchanged/NotFound and the stored status). Never work out the target status in the UI.
 - **Notes and contacts** go through `NoteService` and `ContactService` (`src/ApplicationTracker.Core/Notes`, `.../Contacts`); `ApplicationService.GetDetailsAsync` returns everything the detail page shows.
@@ -22,9 +22,8 @@ Build on these rather than starting over:
 
 ## Gotchas
 
-- Razor attribute values can't contain double-quoted strings or tuple keys (`@ref="dict[(id, "x")]"` doesn't compile); use constants or separate dictionaries.
-- A `string` component parameter given a bare name is a literal: `Error="contactError"` passes the text "contactError"; write `Error="@contactError"`. Non-string parameters (bool, lists) are evaluated as C# without `@`.
-- Focus styles use `outline: 2px solid transparent`, never `outline: none`, so they still show in forced-colours mode.
+The Razor and focus gotchas are in `CLAUDE.md` ("Page patterns"). Layout ones specific to this role:
+
 - Wide content relies on `main { min-width: 0 }` (`Components/Layout/MainLayout.razor.css`); a scroll container with absolutely positioned children (e.g. `.visually-hidden` text) needs `position: relative` (see the "Pipeline board" section of `app.css`).
 
 ## Principles
