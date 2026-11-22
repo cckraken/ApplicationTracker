@@ -16,7 +16,7 @@ public class ApplicationService(IDbContextFactory<TrackerDbContext> dbFactory, T
     private DateTime UtcNow => time.GetUtcNow().UtcDateTime;
 
     /// <summary>The user's local calendar date, used for follow-up urgency.</summary>
-    public DateOnly Today => DateOnly.FromDateTime(time.GetLocalNow().DateTime);
+    public DateOnly Today => time.GetLocalToday();
 
     public async Task<IReadOnlyList<ApplicationSummary>> ListAsync(ApplicationFilter filter, CancellationToken ct = default)
     {
@@ -349,6 +349,42 @@ public class ApplicationService(IDbContextFactory<TrackerDbContext> dbFactory, T
         await using var db = await dbFactory.CreateDbContextAsync(ct);
         var deleted = await db.Applications.Where(a => a.Id == id).ExecuteDeleteAsync(ct);
         return deleted > 0;
+    }
+
+    /// <summary>
+    /// "Followed up": clears the follow-up date. Only acts if the date is still
+    /// <paramref name="expected"/>, so a stale screen can't wipe a date set elsewhere meanwhile.
+    /// </summary>
+    public Task<FollowUpActionOutcome> CompleteFollowUpAsync(int id, DateOnly expected, CancellationToken ct = default) =>
+        ChangeFollowUpAsync(id, expected, newDate: null, ct);
+
+    /// <summary>
+    /// Moves the follow-up date to tomorrow or a week from today. Only acts if the date is still
+    /// <paramref name="expected"/> (see <see cref="CompleteFollowUpAsync"/>).
+    /// </summary>
+    public Task<FollowUpActionOutcome> SnoozeFollowUpAsync(
+        int id, DateOnly expected, SnoozePeriod period, CancellationToken ct = default) =>
+        ChangeFollowUpAsync(id, expected, period.DueFrom(Today), ct);
+
+    private async Task<FollowUpActionOutcome> ChangeFollowUpAsync(
+        int id, DateOnly expected, DateOnly? newDate, CancellationToken ct)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        var app = await db.Applications.SingleOrDefaultAsync(a => a.Id == id, ct);
+        if (app is null)
+        {
+            return FollowUpActionOutcome.NotFound;
+        }
+
+        if (app.FollowUpOn != expected)
+        {
+            return FollowUpActionOutcome.Changed;
+        }
+
+        app.FollowUpOn = newDate;
+        app.UpdatedAt = UtcNow;
+        await db.SaveChangesAsync(ct);
+        return FollowUpActionOutcome.Done;
     }
 
     public static FollowUpState GetFollowUpState(ApplicationStatus status, DateOnly? followUpOn, DateOnly today)

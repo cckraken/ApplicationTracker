@@ -163,6 +163,12 @@ namespace ApplicationTracker.Core.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
+                    b.Property<DateTime?>("CompletedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
                     b.Property<DateOnly>("DueOn")
                         .HasColumnType("TEXT");
 

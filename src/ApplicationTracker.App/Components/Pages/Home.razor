@@ -1,17 +1,35 @@
 ﻿@page "/"
 @inject ApplicationService Applications
+@inject ILogger<Home> Logger
 
 <PageTitle>Today · Application Tracker</PageTitle>
 
 <h1>Today</h1>
 
+<p class="visually-hidden" role="status" aria-live="polite">@announcement</p>
+
+@if (errorNotice is not null)
+{
+    <div class="alert alert-danger alert-dismissible mt-3" role="alert">
+        @errorNotice
+        <button type="button" class="btn-close" aria-label="Dismiss error" @onclick="() => errorNotice = null"></button>
+    </div>
+}
+
 @if (active is null)
 {
-    <p>Loading…</p>
+    @if (loadFailed)
+    {
+        <div class="alert alert-danger mt-3" role="alert">Something went wrong reading the data. Please reload the page.</div>
+    }
+    else
+    {
+        <p>Loading…</p>
+    }
 }
 else if (active.Count == 0)
 {
-    <div class="empty-state mt-3">
+    <div class="empty-state mt-3 mb-4">
         <h2 class="h5">No active applications</h2>
         <p>Add a job you have applied for, or one you are thinking about. Give it a follow-up date and it will show up here on the day it needs attention.</p>
         <div class="d-flex flex-wrap justify-content-center gap-2">
@@ -23,11 +41,16 @@ else if (active.Count == 0)
 else
 {
     <section class="mb-4" aria-labelledby="follow-ups-heading">
-        <h2 id="follow-ups-heading" class="h4">Follow up</h2>
+        @* Same heading shape as the Reminders panel below (count pill), so the two urgent lists scan alike. *@
+        <div class="section-header">
+            <h2 id="follow-ups-heading" class="h4" tabindex="-1" @ref="followUpsHeading">
+                Follow up <span class="board-count">@followUps.Count<span class="visually-hidden"> @(followUps.Count == 1 ? "application" : "applications") to follow up</span></span>
+            </h2>
+        </div>
 
         @if (followUps.Count == 0)
         {
-            <p class="text-body-secondary">Nothing to follow up today.</p>
+            <p class="text-body-secondary">No applications to follow up today.</p>
         }
         else
         {
@@ -37,6 +60,7 @@ else
             <ul class="follow-up-list">
                 @foreach (var item in followUps)
                 {
+                    var name = $"{item.RoleTitle} at {item.CompanyName}";
                     <li @key="item.Id" class="follow-up-item @(item.FollowUpState == FollowUpState.Overdue ? "is-overdue" : "is-due-today")">
                         <div>
                             <a class="fw-semibold" href="applications/@item.Id">@item.RoleTitle</a>
@@ -50,12 +74,34 @@ else
                                 <span class="small text-nowrap">@date.ToString("d MMM yyyy")</span>
                             }
                         </div>
+                        @if (item.FollowUpOn is DateOnly expected)
+                        {
+                            <div class="follow-up-actions">
+                                <button type="button" class="btn btn-outline-primary btn-sm" @ref="followedUpButtons[item.Id]"
+                                        aria-label="@($"Followed up: {name}")" @onclick="() => CompleteAsync(item, expected)">Followed up</button>
+                                @* Each button names its application, like "Followed up", so it makes sense out of context. *@
+                                <span class="snooze-actions">
+                                    <span class="small text-body-secondary" aria-hidden="true">Snooze:</span>
+                                    <button type="button" class="btn btn-link btn-sm btn-quiet"
+                                            aria-label="@($"Snooze until tomorrow: {name}")"
+                                            @onclick="() => SnoozeAsync(item, expected, SnoozePeriod.Tomorrow)">Tomorrow</button>
+                                    <button type="button" class="btn btn-link btn-sm btn-quiet"
+                                            aria-label="@($"Snooze until next week: {name}")"
+                                            @onclick="() => SnoozeAsync(item, expected, SnoozePeriod.NextWeek)">Next week</button>
+                                </span>
+                            </div>
+                        }
                     </li>
                 }
             </ul>
         }
     </section>
+}
 
+<ReminderPanel DueOnly="true" Title="Reminders" HeadingClass="h4" IdPrefix="today-reminders" SectionClass="mb-4" ShowAllLink="true" />
+
+@if (active is { Count: > 0 })
+{
     <section aria-labelledby="overview-heading">
         <h2 id="overview-heading" class="h4">Overview</h2>
         <p>@active.Count active @(active.Count == 1 ? "application" : "applications").</p>
@@ -71,15 +117,154 @@ else
     private IReadOnlyList<ApplicationSummary> followUps = [];
     private int overdue;
     private int dueToday;
+    private bool loadFailed;
+    private string? errorNotice;
+    private string announcement = "";
+    private int loadVersion;
 
-    protected override async Task OnInitializedAsync()
+    // True while an action (save + reload) is running; see Exclusive.
+    private bool busy;
+
+    private ElementReference followUpsHeading;
+    private readonly Dictionary<int, ElementReference> followedUpButtons = new();
+    private Func<Task>? focusAfterRender;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        // Default filter: active applications, sorted by follow-up date, so overdue come first.
-        active = await Applications.ListAsync(new ApplicationFilter());
-        followUps = active
-            .Where(a => a.FollowUpState is FollowUpState.Overdue or FollowUpState.DueToday)
-            .ToList();
-        overdue = followUps.Count(a => a.FollowUpState == FollowUpState.Overdue);
-        dueToday = followUps.Count - overdue;
+        if (focusAfterRender is { } focus)
+        {
+            focusAfterRender = null;
+            try
+            {
+                await focus();
+            }
+            catch (JSException)
+            {
+                // The element went away before it could be focused; nothing useful to do.
+            }
+        }
     }
+
+    private async Task LoadAsync()
+    {
+        var version = ++loadVersion;
+        try
+        {
+            // Default filter: active applications, sorted by follow-up date, so overdue come first.
+            var loaded = await Applications.ListAsync(new ApplicationFilter());
+            if (version != loadVersion)
+            {
+                return;
+            }
+
+            active = loaded;
+            followUps = loaded
+                .Where(a => a.FollowUpState is FollowUpState.Overdue or FollowUpState.DueToday)
+                .ToList();
+            overdue = followUps.Count(a => a.FollowUpState == FollowUpState.Overdue);
+            dueToday = followUps.Count - overdue;
+            loadFailed = false;
+        }
+        catch (Exception ex)
+        {
+            // Keep what is showing; an unhandled exception would end the whole circuit.
+            Logger.LogError(ex, "Loading the Today page failed");
+            if (version == loadVersion)
+            {
+                loadFailed = active is null;
+                if (active is not null)
+                {
+                    errorNotice ??= "Couldn't load the latest data. Please reload the page.";
+                }
+            }
+        }
+    }
+
+    /// <summary>Runs a whole action handler on its own; a click that arrives meanwhile is ignored (see ApplicationDetail).</summary>
+    private async Task Exclusive(Func<Task> action)
+    {
+        if (busy)
+        {
+            return;
+        }
+
+        busy = true;
+        try
+        {
+            await action();
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private Task CompleteAsync(ApplicationSummary item, DateOnly expected) =>
+        Exclusive(() => ApplyAsync(item, () => Applications.CompleteFollowUpAsync(item.Id, expected), () => "Followed up."));
+
+    // The new date is read from the reloaded list, so the message names the date that was saved
+    // (working it out here could be a day off just after midnight).
+    private Task SnoozeAsync(ApplicationSummary item, DateOnly expected, SnoozePeriod period) =>
+        Exclusive(() => ApplyAsync(item, () => Applications.SnoozeFollowUpAsync(item.Id, expected, period),
+            () => active?.FirstOrDefault(a => a.Id == item.Id)?.FollowUpOn is DateOnly saved
+                ? $"Follow-up moved to {saved:d MMM}."
+                : "Follow-up moved."));
+
+    /// <param name="doneMessage">What to announce on success; called after the reload.</param>
+    private async Task ApplyAsync(ApplicationSummary item, Func<Task<FollowUpActionOutcome>> action, Func<string> doneMessage)
+    {
+        var name = $"{item.RoleTitle} at {item.CompanyName}";
+        var index = followUps.ToList().FindIndex(f => f.Id == item.Id);
+        FollowUpActionOutcome outcome;
+        try
+        {
+            outcome = await action();
+            errorNotice = null;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Follow-up action failed for application {Id}", item.Id);
+            errorNotice = $"Couldn't update the follow-up for {name}. Please try again.";
+            await LoadAsync();
+            return;
+        }
+
+        followedUpButtons.Remove(item.Id);
+        await LoadAsync();
+        switch (outcome)
+        {
+            case FollowUpActionOutcome.Done:
+                Announce($"{name}: {doneMessage()}");
+                break;
+            case FollowUpActionOutcome.Changed:
+                errorNotice = $"The follow-up date for {name} was changed elsewhere, so nothing was saved. The list now shows the latest.";
+                break;
+            default:
+                errorNotice = $"{name} no longer exists. It may have been deleted elsewhere.";
+                break;
+        }
+
+        // Stay in the list: focus the follow-up that moved up into its place, or the heading.
+        focusAfterRender = () =>
+        {
+            if (followUps.Count > 0 && index >= 0)
+            {
+                var next = followUps[Math.Min(index, followUps.Count - 1)].Id;
+                if (followedUpButtons.TryGetValue(next, out var button))
+                {
+                    return button.FocusAsync().AsTask();
+                }
+            }
+            return active is { Count: > 0 } ? followUpsHeading.FocusAsync().AsTask() : Task.CompletedTask;
+        };
+    }
+
+    /// <summary>
+    /// Sets the live region text. The same text twice in a row would be silent (nothing changed),
+    /// so a trailing no-break space is toggled to make it change.
+    /// </summary>
+    private void Announce(string text) =>
+        announcement = announcement == text ? text + " " : text;
 }

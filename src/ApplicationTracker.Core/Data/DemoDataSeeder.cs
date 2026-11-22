@@ -38,7 +38,7 @@ public static class DemoDataSeeder
         }
 
         var utcNow = time.GetUtcNow().UtcDateTime;
-        var today = DateOnly.FromDateTime(time.GetLocalNow().DateTime);
+        var today = time.GetLocalToday();
 
         foreach (var demo in Demos)
         {
@@ -92,7 +92,38 @@ public static class DemoDataSeeder
         // One contact not linked to any application yet, as found on the Contacts page.
         db.Contacts.Add(new Contact { Name = "Robin Hale", Role = "Agency recruiter", Email = "robin.hale@example.com" });
 
+        AddReminders(db, today, utcNow);
+
         await db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>
+    /// One reminder in each state the screens show: overdue and done ones that stand alone,
+    /// and due-today and upcoming ones linked to an application.
+    /// </summary>
+    private static void AddReminders(TrackerDbContext db, DateOnly today, DateTime utcNow)
+    {
+        var apps = db.Applications.Local.ToDictionary(a => a.Company.Name);
+
+        db.Reminders.Add(new Reminder { Text = "Update CV with the latest project", DueOn = today.AddDays(-1), CreatedAt = utcNow.AddDays(-3) });
+        db.Reminders.Add(new Reminder
+        {
+            Text = "Send portfolio link to the recruiter",
+            DueOn = today,
+            JobApplication = apps["Adventure Works"],
+            CreatedAt = utcNow.AddDays(-2),
+        });
+        db.Reminders.Add(new Reminder
+        {
+            Text = "Prepare questions for the panel interview",
+            DueOn = today.AddDays(2),
+            JobApplication = apps["Proseware"],
+            CreatedAt = utcNow.AddDays(-1),
+        });
+
+        var done = new Reminder { Text = "Set up job alerts on LinkedIn", DueOn = today.AddDays(-2), CreatedAt = utcNow.AddDays(-4) };
+        done.Complete(utcNow.AddDays(-2));
+        db.Reminders.Add(done);
     }
 
     /// <summary>Fictional people for the later-stage demo applications.</summary>
