@@ -27,5 +27,11 @@ coverage*/
 appsettings.*.local.json
 secrets.json
 
+# Keys and certificates
+*.pfx
+*.p12
+*.pem
+*.key
+
 # Claude Code personal settings
 .claude/settings.local.json
